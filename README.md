@@ -37,7 +37,7 @@ Supporting folders:
 
 - [`metadata`](./metadata/): plate maps and barcodes, including treatment and pathway annotations
 - [`utils`](./utils/): shared helper functions
-- [`environments`](./environments/): the conda environment for CellProfiler
+- [`environments`](./environments/): the conda environment for CellProfiler (the uv Python environment is defined by [`pyproject.toml`](./pyproject.toml) and [`uv.lock`](./uv.lock) in the repository root)
 
 ## Environments
 
@@ -52,7 +52,7 @@ mamba env create -f environments/cellprofiler_env.yml
 uv sync --locked
 ```
 
-[`environments/hpc_create_envs.sh`](./environments/hpc_create_envs.sh) creates all environments on a Slurm cluster.
+[`environments/hpc_create_envs.sh`](./environments/hpc_create_envs.sh) creates the CellProfiler environment on a Slurm cluster. Run `uv sync --locked` there for the Python environment.
 
 ## Outputs
 
