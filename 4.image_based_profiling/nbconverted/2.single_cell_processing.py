@@ -1,8 +1,7 @@
 #!/usr/bin/env python
-# coding: utf-8
 
 # # Process single cell profiles
-# 
+#
 # NOTE: We are normalizing the plates for all samples as we only have three wells associated with the healthy controls, which is insufficient for normalization.
 
 # ## Import libraries
@@ -15,9 +14,7 @@ import pathlib
 import pprint
 
 import pandas as pd
-
-from pycytominer import annotate, normalize, feature_select
-
+from pycytominer import annotate, feature_select, normalize
 
 # ## Set paths and variables
 
@@ -155,6 +152,18 @@ for plate, info in plate_info_dictionary.items():
     # Rename columns
     annotated_df.rename(columns={"Image_Metadata_Site": "Metadata_Site"}, inplace=True)
 
+    # Mark the image file and folder columns that CellProfiler writes as metadata. They are text,
+    # not features, and pycytominer 1.5.0 and later pass the columns that are not Metadata_
+    # columns through normalization as if they were features.
+    annotated_df.rename(
+        columns={
+            col: f"Metadata_{col}"
+            for col in annotated_df.columns
+            if col.startswith(("Image_FileName_", "Image_PathName_"))
+        },
+        inplace=True,
+    )
+
     # Save back
     annotated_df.to_parquet(output_annotated_file, index=False)
 
@@ -207,4 +216,3 @@ print(
     "Metadata columns:", [col for col in test_df.columns if col.startswith("Metadata_")]
 )
 test_df.head(2)
-
