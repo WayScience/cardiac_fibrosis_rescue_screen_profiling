@@ -14,8 +14,6 @@ dependencies = [
   "nbconvert",
   "pandas==2.3.3",
   "papermill",
-  # pycytominer 1.5.0 and later keep string columns (Image_FileName_*, Image_PathName_*) through
-  # normalization and feature selection, and 1.7.1 selects the features of the existing profiles
   "pycytominer==1.7.1",
   "scikit-learn==1.7.2",
   "seaborn",
