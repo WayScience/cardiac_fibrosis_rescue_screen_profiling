@@ -3,11 +3,12 @@
 # -----------------------------
 # Initialize environment
 # -----------------------------
-conda init bash
-conda activate fibrosis_preprocessing_env
+# create or update the environment from uv.lock (needs uv: https://docs.astral.sh/uv/)
+# --locked stops with an error instead of changing uv.lock when pyproject.toml and the lockfile disagree
+uv sync --locked
 
 # convert notebooks to scripts
-jupyter nbconvert --to script --output-dir=nbconverted/ *.ipynb
+uv run --locked jupyter nbconvert --to script --output-dir=nbconverted/ *.ipynb
 
 # -----------------------------
 # Set the batches explicitly
@@ -41,7 +42,7 @@ for BATCH in "${BATCH_LIST[@]}"; do
 
     if [ "$RUN_CONVERT" = true ]; then
         echo ">>> Running CytoTable conversion for ${BATCH}"
-        python nbconverted/0.convert_cytotable.py
+        uv run --locked python nbconverted/0.convert_cytotable.py
     else
         echo "✅ Conversion already complete"
     fi
@@ -60,7 +61,7 @@ for BATCH in "${BATCH_LIST[@]}"; do
             plate_id=$(basename "$plate_dir")
             echo "   ⏱ Starting QC for plate ${plate_id}"
 
-            papermill 1a.sc_quality_control.ipynb \
+            uv run --locked papermill 1a.sc_quality_control.ipynb \
                 ./papermill_outputs/1a.sc_quality_control_${platemap_layout}_${plate_id}.ipynb \
                 -p platemap_layout "${platemap_layout}" \
                 -p plate_id "${plate_id}" &   # run in background
@@ -75,13 +76,13 @@ for BATCH in "${BATCH_LIST[@]}"; do
     # Single-cell processing (batch)
     # -----------------------------
     echo ">>> Running single-cell processing for ${BATCH}"
-    python nbconverted/2.single_cell_processing.py
+    uv run --locked python nbconverted/2.single_cell_processing.py
 
     # -----------------------------
     # Position correction (batch)
     # -----------------------------
     echo ">>> Applying position correction for ${BATCH}"
-    python nbconverted/3b.apply_position_correction.py
+    uv run --locked python nbconverted/3b.apply_position_correction.py
 
     echo ">>> Completed batch ${BATCH}"
 done
@@ -93,6 +94,6 @@ done
 # performs one pooled feature selection. It reads all batches, so it
 # runs once after the batch loop.
 echo ">>> Generating pooled bulk profiles for all batches"
-python nbconverted/4.bulk_processing.py
+uv run --locked python nbconverted/4.bulk_processing.py
 
 echo ">>> All batches processed ✅"

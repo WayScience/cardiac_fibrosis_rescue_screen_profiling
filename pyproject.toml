@@ -1,0 +1,26 @@
+[project]
+name = "cardiac-fibrosis-rescue-screen-profiling"
+version = "0.1.0"
+description = "Image analysis and image-based profiling of a cardiac fibroblast drug screen"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "Cytotable==1.2.6",
+  "coSMicQC==1.1.2",
+  "ipykernel",
+  "joblib",
+  "jupyterlab",
+  "matplotlib",
+  "nbconvert",
+  "pandas==2.3.3",
+  "papermill",
+  "pycytominer==1.7.1",
+  "scikit-learn==1.7.2",
+  "seaborn",
+  "tabulate",
+  "upsetplot"
+]
+
+[tool.uv]
+# The notebooks import the helper modules in utils/ by path, so this is not an installable package
+package = false

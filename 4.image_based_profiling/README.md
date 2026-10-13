@@ -77,7 +77,8 @@ data/
 
 ## Run the pipeline
 
-Create the preprocessing environment from [`environments/preprocessing_env.yml`](../environments/preprocessing_env.yml) (`fibrosis_preprocessing_env`).
+Create the Python environment with `uv sync --locked` from the repository root (see the [README](../README.md#environments)).
+The script runs every command with `uv run --locked`, which stops with an error instead of changing `uv.lock`.
 To run the pipeline from conversion through bulk processing, execute the bash script from this directory:
 
 ```bash
