@@ -37,17 +37,19 @@ Supporting folders:
 
 - [`metadata`](./metadata/): plate maps and barcodes, including treatment and pathway annotations
 - [`utils`](./utils/): shared helper functions
-- [`environments`](./environments/): conda environments
+- [`environments`](./environments/): the conda environment for CellProfiler
 
 ## Environments
 
 1. [CellProfiler environment](./environments/cellprofiler_env.yml) (`fibrosis_cp_env`): CellProfiler, for image QC, illumination correction, and feature extraction (modules 1, 2, 3, and the validation plate equivalents)
-2. [Preprocessing environment](./environments/preprocessing_env.yml) (`fibrosis_preprocessing_env`): pycytominer, CytoTable, and coSMicQC, for image-based profiling (module 4 and the validation plate profiling)
+2. Python environment (a [uv](https://docs.astral.sh/uv/) project: [`pyproject.toml`](./pyproject.toml) and [`uv.lock`](./uv.lock)): pycytominer, CytoTable, and coSMicQC, for image-based profiling (module 4 and the validation plate profiling)
 
-Create an environment with conda or mamba from the root of this repository:
+The profiles depend on the pycytominer version, so the lockfile pins pycytominer 1.7.1 and the packages that the existing profiles were checked with.
+Create the environments from the root of this repository:
 
 ```bash
-mamba env create -f environments/preprocessing_env.yml
+mamba env create -f environments/cellprofiler_env.yml
+uv sync --locked
 ```
 
 [`environments/hpc_create_envs.sh`](./environments/hpc_create_envs.sh) creates all environments on a Slurm cluster.
