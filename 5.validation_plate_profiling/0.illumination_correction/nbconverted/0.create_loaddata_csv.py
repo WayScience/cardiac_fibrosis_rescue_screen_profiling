@@ -55,15 +55,15 @@ plate_folder_pattern = re.compile(r"CARD-CelIns-CX7_[A-Za-z0-9_-]+")
 # 
 # Update `IMAGE_INPUTS` to point to the hit validation image directory.
 
-# In[3]:
+# In[ ]:
 
 
 repo_root = Path("..").resolve()
 
-# Path(s) to image directories
+# Path(s) to image directories (searched recursively; each plate is nested as "Plate #/<plate_id>/")
 IMAGE_INPUTS = [
     Path(
-        "/home/jenna/mnt/Way_McKinsey_Cardiac_Fibrosis/Compound_Screen/hit_validation_cell_painting/CARD-CelIns-CX7_260803130001"
+        "/home/jenna/mnt/Way_McKinsey_Cardiac_Fibrosis/Compound_Screen_data/hit_validation_2_cell_painting"
     ),
 ]
 

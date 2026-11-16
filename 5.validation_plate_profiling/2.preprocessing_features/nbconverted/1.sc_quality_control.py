@@ -8,8 +8,9 @@
 # In[1]:
 
 
-import pathlib
 import json
+import os
+import pathlib
 
 import matplotlib
 
@@ -27,7 +28,8 @@ from cytodataframe import CytoDataFrame
 
 
 # Set parameters for papermill to use for processing
-plate_id = "CARD-CelIns-CX7_260803130001"
+# When running as a script, set the plate with the PLATE_ID environment variable
+plate_id = os.environ.get("PLATE_ID", "CARD-CelIns-CX7_261031160001")
 
 
 # In[3]:
@@ -60,10 +62,10 @@ nuclei_metadata_columns = [
     "Image_Metadata_Site",
     "Metadata_Nuclei_Location_Center_X",
     "Metadata_Nuclei_Location_Center_Y",
-    "Image_PathName_OrigDNA",
-    "Image_FileName_OrigDNA",
-    "Image_PathName_OrigActin",
-    "Image_FileName_OrigActin",
+    "Metadata_Image_PathName_OrigDNA",
+    "Metadata_Image_FileName_OrigDNA",
+    "Metadata_Image_PathName_OrigActin",
+    "Metadata_Image_FileName_OrigActin",
     "Nuclei_AreaShape_BoundingBoxMaximum_X",
     "Nuclei_AreaShape_BoundingBoxMaximum_Y",
     "Nuclei_AreaShape_BoundingBoxMinimum_X",
@@ -75,10 +77,10 @@ cells_metadata_columns = [
     "Image_Metadata_Site",
     "Metadata_Cells_Location_Center_X",
     "Metadata_Cells_Location_Center_Y",
-    "Image_PathName_OrigDNA",
-    "Image_FileName_OrigDNA",
-    "Image_PathName_OrigActin",
-    "Image_FileName_OrigActin",
+    "Metadata_Image_PathName_OrigDNA",
+    "Metadata_Image_FileName_OrigDNA",
+    "Metadata_Image_PathName_OrigActin",
+    "Metadata_Image_FileName_OrigActin",
     "Cells_AreaShape_BoundingBoxMaximum_X",
     "Cells_AreaShape_BoundingBoxMaximum_Y",
     "Cells_AreaShape_BoundingBoxMinimum_X",
@@ -110,20 +112,20 @@ print(f"Loaded plate: {plate_path.stem}, Shape: {plate_df.shape}")
 
 # Confirm image paths already point to valid local files (no remapping needed for this plate)
 example_path = pathlib.Path(
-    plate_df["Image_PathName_OrigDNA"].dropna().iloc[0]
-) / plate_df["Image_FileName_OrigDNA"].dropna().iloc[0]
+    plate_df["Metadata_Image_PathName_OrigDNA"].dropna().iloc[0]
+) / plate_df["Metadata_Image_FileName_OrigDNA"].dropna().iloc[0]
 if not example_path.is_file():
     raise FileNotFoundError(f"Example image path does not exist: {example_path}")
 
 # Print example image path
-print(plate_df["Image_PathName_OrigDNA"].dropna().iloc[0])
+print(plate_df["Metadata_Image_PathName_OrigDNA"].dropna().iloc[0])
 
 
 # In[6]:
 
 
 # Print example image file
-print(plate_df["Image_FileName_OrigDNA"].dropna().iloc[0])
+print(plate_df["Metadata_Image_FileName_OrigDNA"].dropna().iloc[0])
 
 
 # ## Set mapping for outlines
@@ -182,12 +184,19 @@ oversegmented_nuclei_outliers_cdf = CytoDataFrame(
         "center_dot": False,
         "brightness": 5,
         "outline_color": (180, 30, 180),
+        # crop a larger window around each object's center to see more context
+        "offset_bounding_box": {
+            "x_min": -100,
+            "y_min": -100,
+            "x_max": 100,
+            "y_max": 100,
+        },
     },
 )[
     [
+        "Metadata_Image_FileName_OrigDNA",
         "Nuclei_AreaShape_Solidity",
         "Nuclei_Intensity_MassDisplacement_DNA",
-        "Image_FileName_OrigDNA",
     ]
 ]
 
@@ -196,37 +205,44 @@ oversegmented_nuclei_outliers_cdf.sort_values(
 ).head(5)
 
 
-# ## Detect mis-segmented background as nuclei
+# ## Detect high intensity nuclei
 
 # In[10]:
 
 
-# Find low intensity nuclei outliers for the current plate
-low_intensity_outliers = find_outliers(
+# Find high intensity nuclei outliers for the current plate
+high_intensity_outliers = find_outliers(
     df=plate_df,
     metadata_columns=nuclei_metadata_columns,
-    feature_thresholds=qc_thresholds.get("low_intensity_nuclei", {}),
+    feature_thresholds=qc_thresholds.get("high_intensity_nuclei", {}),
 )
 
 # Convert to CytoDataFrame for outline viewing
-low_intensity_outliers_cdf = CytoDataFrame(
-    data=pd.DataFrame(low_intensity_outliers),
+high_intensity_outliers_cdf = CytoDataFrame(
+    data=pd.DataFrame(high_intensity_outliers),
     data_outline_context_dir=f"../1.cellprofiler_processing/cp_output/{plate_id}/",
     segmentation_file_regex=outline_to_orig_mapping,
     display_options={
         "center_dot": False,
         "brightness": 5,
         "outline_color": (180, 30, 180),
+        # crop a larger window around each object's center to see more context
+        "offset_bounding_box": {
+            "x_min": -100,
+            "y_min": -100,
+            "x_max": 100,
+            "y_max": 100,
+        },
     },
 )[
     [
         "Nuclei_Intensity_MeanIntensity_DNA",
-        "Image_FileName_OrigDNA",
+        "Metadata_Image_FileName_OrigDNA",
     ]
 ]
 
-low_intensity_outliers_cdf.sort_values(
-    by="Nuclei_Intensity_MeanIntensity_DNA", ascending=False
+high_intensity_outliers_cdf.sort_values(
+    by="Nuclei_Intensity_MeanIntensity_DNA", ascending=True
 ).head(5)
 
 
@@ -257,14 +273,21 @@ small_cells_outliers_cdf = CytoDataFrame(
     data_outline_context_dir=f"../1.cellprofiler_processing/cp_output/{plate_id}/",
     segmentation_file_regex=outline_to_orig_mapping,
     display_options={
-        "center_dot": False,
+        "center_dot": True,
         "brightness": 5,
         "outline_color": (180, 30, 180),
+        # crop a larger window around each object's center to see more context
+        "offset_bounding_box": {
+            "x_min": -300,
+            "y_min": -300,
+            "x_max": 300,
+            "y_max": 300,
+        },
     },
 )[
     [
         "Cells_AreaShape_Area",
-        "Image_FileName_OrigActin",
+        "Metadata_Image_FileName_OrigActin",
     ]
 ]
 
@@ -291,23 +314,30 @@ blurry_cells_outliers_cdf = CytoDataFrame(
     data_outline_context_dir=f"../1.cellprofiler_processing/cp_output/{plate_id}/",
     segmentation_file_regex=outline_to_orig_mapping,
     display_options={
-        "center_dot": False,
+        "center_dot": True,
         "brightness": 5,
         "outline_color": (180, 30, 180),
+        # crop a larger window around each object's center to see more context
+        "offset_bounding_box": {
+            "x_min": -300,
+            "y_min": -300,
+            "x_max": 300,
+            "y_max": 300,
+        },
     },
 )[
     [
         "Cells_Granularity_1_Actin",
-        "Image_FileName_OrigActin",
+        "Metadata_Image_FileName_OrigActin",
     ]
 ]
 
 blurry_cells_outliers_cdf.sort_values(
-    by="Cells_Granularity_1_Actin", ascending=True
+    by="Cells_Granularity_1_Actin", ascending=False
 ).head(10)
 
 
-# ## Detect mis-segmented cells based on number of indentations (solidity)
+# ## Detect mis-segmented cells based on number of indentations
 # 
 # We have seen that due to low staining in some Actin FOVs that segmentation will mis-segment to include more background than it should.
 
@@ -327,20 +357,27 @@ missegmented_cells_outliers_cdf = CytoDataFrame(
     data_outline_context_dir=f"../1.cellprofiler_processing/cp_output/{plate_id}/",
     segmentation_file_regex=outline_to_orig_mapping,
     display_options={
-        "center_dot": False,
+        "center_dot": True,
         "brightness": 1,
         "outline_color": (180, 30, 180),
+        # crop a larger window around each object's center to see more context
+        "offset_bounding_box": {
+            "x_min": -300,
+            "y_min": -300,
+            "x_max": 300,
+            "y_max": 300,
+        },
     },
 )[
     [
-        "Image_FileName_OrigActin",
-        "Cells_Intensity_MeanIntensity_Actin",
+        "Metadata_Image_FileName_OrigActin",
         "Cells_AreaShape_FormFactor",
+        "Cells_Intensity_MeanIntensity_Actin",
     ]
 ]
 
 missegmented_cells_outliers_cdf.sort_values(
-    by="Cells_Intensity_MeanIntensity_Actin", ascending=True
+    by="Cells_AreaShape_FormFactor", ascending=False
 ).head(10)
 
 
@@ -356,8 +393,8 @@ plate_df["Metadata_cqc_failed_oversegmented_nuclei"] = plate_df.index.isin(
 plate_df["Metadata_cqc_failed_small_cells"] = plate_df.index.isin(
     small_cells_outliers.index
 )
-plate_df["Metadata_cqc_failed_low_intensity"] = plate_df.index.isin(
-    low_intensity_outliers.index
+plate_df["Metadata_cqc_failed_high_intensity"] = plate_df.index.isin(
+    high_intensity_outliers.index
 )
 plate_df["Metadata_cqc_failed_blurry_cells"] = plate_df.index.isin(
     blurry_cells_outliers.index
@@ -370,7 +407,7 @@ plate_df["Metadata_cqc_failed_missegmented_cells"] = plate_df.index.isin(
 qc_fail_cols = [
     "Metadata_cqc_failed_oversegmented_nuclei",
     "Metadata_cqc_failed_small_cells",
-    "Metadata_cqc_failed_low_intensity",
+    "Metadata_cqc_failed_high_intensity",
     "Metadata_cqc_failed_blurry_cells",
     "Metadata_cqc_failed_missegmented_cells",
 ]
@@ -404,8 +441,8 @@ plate_df.loc[
     plate_df.index.isin(oversegmented_nuclei_outliers.index), "Outlier_Status"
 ] = "Over-segmented nuclei"
 
-plate_df.loc[plate_df.index.isin(low_intensity_outliers.index), "Outlier_Status"] = (
-    "Mis-segmented nuclei"
+plate_df.loc[plate_df.index.isin(high_intensity_outliers.index), "Outlier_Status"] = (
+    "High intensity nuclei"
 )
 
 # Create scatter plot
@@ -418,7 +455,7 @@ sns.scatterplot(
     palette={
         "Single-cell passed QC": "#006400",
         "Over-segmented nuclei": "#990090",
-        "Mis-segmented nuclei": "#D55E00",
+        "High intensity nuclei": "#D55E00",
     },
     alpha=0.6,
 )
