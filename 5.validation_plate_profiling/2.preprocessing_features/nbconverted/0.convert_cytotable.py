@@ -8,14 +8,14 @@
 # In[1]:
 
 
+import logging
 import pathlib
-import pandas as pd
 import pprint
+
+import pandas as pd
 
 # cytotable will merge objects from SQLite file into single cells and save as parquet file
 from cytotable import convert, presets
-
-import logging
 
 # Set the logging level to a higher level to avoid outputting unnecessary errors from config file in convert function
 logging.getLogger().setLevel(logging.ERROR)
@@ -116,7 +116,7 @@ else:
 
 # # Load in converted profiles to update
 # 
-# We will rename some of the columns (e.g., location centroids and cell count per FOV) to include Metadata prefix.
+# We will rename some of the columns (e.g., location centroids and cell count per FOV, image FileName and PathName columns) to include Metadata prefix.
 
 # In[5]:
 
@@ -149,13 +149,20 @@ else:
         # Drop rows where "Metadata_ImageNumber" is NaN
         df = df.dropna(subset=["Metadata_ImageNumber"])
 
+        # Add the image FileName and PathName columns (one per channel) to the update list
+        plate_metadata_columns = metadata_columns_to_update + [
+            col
+            for col in df.columns
+            if col.startswith(("Image_FileName_", "Image_PathName_"))
+        ]
+
         # Rearrange columns and add "Metadata_" prefix
         df = df[
-            metadata_columns_to_update
-            + [col for col in df.columns if col not in metadata_columns_to_update]
+            plate_metadata_columns
+            + [col for col in df.columns if col not in plate_metadata_columns]
         ].rename(
             columns=lambda col: (
-                "Metadata_" + col if col in metadata_columns_to_update else col
+                "Metadata_" + col if col in plate_metadata_columns else col
             )
         )
 

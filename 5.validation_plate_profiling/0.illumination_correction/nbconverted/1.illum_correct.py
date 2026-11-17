@@ -32,7 +32,7 @@ run_name = "illum_correction"
 
 # ### Set up paths
 
-# In[3]:
+# In[ ]:
 
 
 # set main output dir for all plates if it doesn't exist
@@ -41,11 +41,13 @@ output_dir.mkdir(exist_ok=True)
 
 # set base directory for where the images are located (WILL NEED TO CHANGE ON YOUR LOCAL MACHINE)
 base_dir = pathlib.Path(
-    "/home/jenna/mnt/Way_McKinsey_Cardiac_Fibrosis/Compound_Screen/hit_validation_cell_painting"
+    "/home/jenna/mnt/Way_McKinsey_Cardiac_Fibrosis/Compound_Screen_data/hit_validation_2_cell_painting"
 ).resolve(strict=True)
 
-# list for plate names based on folders found in the base directory
-plate_names = sorted(folder.name for folder in base_dir.iterdir() if folder.is_dir())
+# list for plate names based on plate folders nested within "Plate #" folders in the base directory
+plate_names = sorted(
+    folder.name for folder in base_dir.glob("*/CARD-CelIns-CX7_*") if folder.is_dir()
+)
 
 print("Found", len(plate_names), "plates:")
 for plate in plate_names:

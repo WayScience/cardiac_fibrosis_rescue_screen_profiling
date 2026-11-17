@@ -15,7 +15,7 @@
 # | d3 | OrigER |
 # | d4 | OrigDNA |
 
-# In[ ]:
+# In[1]:
 
 
 from pathlib import Path
@@ -28,7 +28,7 @@ import loaddata_csv
 
 # ## Set paths and variables
 
-# In[ ]:
+# In[2]:
 
 
 # Set path to find original loaddata csv files
@@ -64,5 +64,5 @@ updated_dfs = loaddata_csv.add_illumination_columns_to_loaddata_csvs(
 )
 
 # Print one plate example
-display(next(iter(updated_dfs.values())).head())
+print(next(iter(updated_dfs.values())).head())
 
