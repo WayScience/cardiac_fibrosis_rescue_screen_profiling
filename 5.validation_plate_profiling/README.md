@@ -11,8 +11,11 @@ There are five replicate validation plates, which all share the same plate layou
 | `CARD-CelIns-CX7_261102080001` |
 | `CARD-CelIns-CX7_261102150001` |
 
+The compounds on these plates are drug hits from the screen, selected with our optimized hit-calling methodology.
+
 An earlier preliminary validation plate (`CARD-CelIns-CX7_260803130001`) is deprecated.
-Its local outputs are kept in each step's `preliminary_validation_plate/` folder, which git ignores, and its files on bandicoot are in `CFReT_screening_data/validation_profiles/deprecated/`.
+Its compounds were drug hits selected with an earlier hit-calling method that was not reliable, so it did not test the right set of hits.
+Its local outputs are kept in each step's `preliminary_validation_plate/` folder, which git ignores.
 
 ## Channels
 

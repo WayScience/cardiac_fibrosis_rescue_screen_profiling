@@ -18,7 +18,7 @@ matplotlib.use("Agg")  # Ensures no GUI windows are opened
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-from cosmicqc import find_outliers
+from cosmicqc import find_outliers, label_outliers
 from cytodataframe import CytoDataFrame
 
 
@@ -382,73 +382,55 @@ missegmented_cells_outliers_cdf.sort_values(
 
 
 # ## Label outliers and save data for the plate
+# 
+# We label every cell with `label_outliers`, using all of the plate's conditions in `sc_qc_thresholds.json` at once.
+# This adds one `Metadata_cqc_<condition>_is_outlier` column per condition, and the full profiles with these labels are saved as the QC-labeled profiles.
+# The `find_outliers` results above are only used to look at example outlier cells.
 
 # In[15]:
 
 
-# Add QC failure columns
-plate_df["Metadata_cqc_failed_oversegmented_nuclei"] = plate_df.index.isin(
-    oversegmented_nuclei_outliers.index
-)
-plate_df["Metadata_cqc_failed_small_cells"] = plate_df.index.isin(
-    small_cells_outliers.index
-)
-plate_df["Metadata_cqc_failed_high_intensity"] = plate_df.index.isin(
-    high_intensity_outliers.index
-)
-plate_df["Metadata_cqc_failed_blurry_cells"] = plate_df.index.isin(
-    blurry_cells_outliers.index
-)
-plate_df["Metadata_cqc_failed_missegmented_cells"] = plate_df.index.isin(
-    missegmented_cells_outliers.index
+# Label the outliers for every condition and save the full profiles with the labels
+qc_labeled_path = qc_labeled_dir / f"{plate_id}_qc_labeled.parquet"
+labeled_df = pd.DataFrame(
+    label_outliers(
+        df=plate_df,
+        feature_thresholds=qc_thresholds,
+        export_path=str(qc_labeled_path),
+    )
 )
 
 # Determine cells that failed any QC condition
-qc_fail_cols = [
-    "Metadata_cqc_failed_oversegmented_nuclei",
-    "Metadata_cqc_failed_small_cells",
-    "Metadata_cqc_failed_high_intensity",
-    "Metadata_cqc_failed_blurry_cells",
-    "Metadata_cqc_failed_missegmented_cells",
-]
+qc_fail_cols = [col for col in labeled_df.columns if col.startswith("Metadata_cqc_")]
+failed_mask = labeled_df[qc_fail_cols].any(axis=1)
 
-failed_mask = plate_df[qc_fail_cols].any(axis=1)
-
-# Calculate the total percentage of nuclei that failed QC
-total_nuclei = plate_df.shape[0]
-total_failed = failed_mask.sum()
-percent_failed = (total_failed / total_nuclei) * 100 if total_nuclei > 0 else 0
-
-# Save labeled data for this plate
-plate_cleaned_name = plate_df["Image_Metadata_Plate"].iloc[0]
-plate_df.to_parquet(f"{qc_labeled_dir}/{plate_cleaned_name}_qc_labeled.parquet")
+# Print the percentage of cells that failed each condition
+print((labeled_df[qc_fail_cols].mean() * 100).round(2).to_string())
 
 # Verify the result and include the percentage of failed QC
 print(
-    f"QC labeled data saved for plate {plate_cleaned_name}. "
-    f"Shape: {plate_df.shape}. Total percent nuclei failed QC: {percent_failed:.2f}%"
+    f"QC labeled data saved for plate {plate_id}. "
+    f"Shape: {labeled_df.shape}. Total percent nuclei failed QC: {failed_mask.mean() * 100:.2f}%"
 )
 
 
 # In[16]:
 
 
+oversegmented_mask = labeled_df["Metadata_cqc_oversegmented_nuclei_is_outlier"]
+high_intensity_mask = labeled_df["Metadata_cqc_high_intensity_nuclei_is_outlier"]
+
 # Set the default value to 'Single-cell passed QC'
-plate_df["Outlier_Status"] = "Single-cell passed QC"
+labeled_df["Outlier_Status"] = "Single-cell passed QC"
 
 # Label each outlier type, excluding small cells
-plate_df.loc[
-    plate_df.index.isin(oversegmented_nuclei_outliers.index), "Outlier_Status"
-] = "Over-segmented nuclei"
-
-plate_df.loc[plate_df.index.isin(high_intensity_outliers.index), "Outlier_Status"] = (
-    "High intensity nuclei"
-)
+labeled_df.loc[oversegmented_mask, "Outlier_Status"] = "Over-segmented nuclei"
+labeled_df.loc[high_intensity_mask, "Outlier_Status"] = "High intensity nuclei"
 
 # Create scatter plot
 plt.figure(figsize=(10, 6))
 sns.scatterplot(
-    data=plate_df,
+    data=labeled_df,
     x="Nuclei_AreaShape_Solidity",
     y="Nuclei_Intensity_MassDisplacement_DNA",
     hue="Outlier_Status",
@@ -462,13 +444,13 @@ sns.scatterplot(
 
 # Add threshold lines
 plt.axvline(
-    x=oversegmented_nuclei_outliers["Nuclei_AreaShape_Solidity"].max(),
+    x=labeled_df.loc[oversegmented_mask, "Nuclei_AreaShape_Solidity"].max(),
     color="r",
     linestyle="--",
     label="Min. threshold for Nuclei Solidity",
 )
 plt.axhline(
-    y=oversegmented_nuclei_outliers["Nuclei_Intensity_MassDisplacement_DNA"].min(),
+    y=labeled_df.loc[oversegmented_mask, "Nuclei_Intensity_MassDisplacement_DNA"].min(),
     color="b",
     linestyle="--",
     label="Min. threshold for Nuclei Mass Displacement",
@@ -491,10 +473,14 @@ plt.close()
 # In[17]:
 
 
+small_cells_threshold = labeled_df.loc[
+    labeled_df["Metadata_cqc_undersegmented_cells_is_outlier"], "Cells_AreaShape_Area"
+].max()
+
 # Create KDE plot of all cells
 plt.figure(figsize=(10, 6))
 sns.kdeplot(
-    x=plate_df["Cells_AreaShape_Area"],
+    x=labeled_df["Cells_AreaShape_Area"],
     fill=True,
     color="#4682B4",  # steel blue
     alpha=0.6,
@@ -502,10 +488,10 @@ sns.kdeplot(
 
 # Add threshold line for small cells
 plt.axvline(
-    x=small_cells_outliers["Cells_AreaShape_Area"].max(),
+    x=small_cells_threshold,
     color="r",
     linestyle="--",
-    label=f'Small cells threshold: < {small_cells_outliers["Cells_AreaShape_Area"].max():.2f}',
+    label=f"Small cells threshold: < {small_cells_threshold:.2f}",
 )
 
 # Labels and title

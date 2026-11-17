@@ -7,28 +7,20 @@
 
 # ## Import libraries
 
-# In[ ]:
+# In[1]:
 
 
 import pathlib
-import sys
-from functools import partial
 
 import pandas as pd
-
 from pycytominer import annotate, feature_select, normalize
-
-sys.path.append("../../utils")
-import io_utils
+from pycytominer.cyto_utils import output
 
 
 # ## Set paths and variables
 
-# In[ ]:
+# In[2]:
 
-
-# Where to save the processed profiles: "local", "bandicoot", or "both"
-save_to = "both"
 
 # Directory with QC-labeled profiles
 qc_labeled_dir = pathlib.Path("./data/qc_labeled_profiles/").resolve(strict=True)
@@ -44,22 +36,12 @@ for plate_id in plate_ids:
 
 # Local directory to save single-cell profiles
 output_dir = pathlib.Path("./data/single_cell_profiles/")
+output_dir.mkdir(parents=True, exist_ok=True)
 
-# Directory on bandicoot to save single-cell profiles
+# Directory on bandicoot to save a copy of the single-cell profiles
 bandicoot_output_dir = pathlib.Path(
     "~/mnt/bandicoot/CFReT_screening_data/validation_profiles/single_cell_profiles/"
 ).expanduser()
-
-# Save a profile to the location(s) set by save_to
-save_profile = partial(
-    io_utils.save_parquet,
-    save_to=save_to,
-    local_dir=output_dir,
-    bandicoot_dir=bandicoot_output_dir,
-)
-
-# Directory to read saved profiles back from in the checks below
-saved_dir = bandicoot_output_dir if save_to == "bandicoot" else output_dir
 
 # Path to the platemap (all validation plates share the same layout)
 platemap_path = pathlib.Path(
@@ -74,10 +56,13 @@ feature_select_ops = [
     "correlation_threshold",
 ]
 
+# suffixes of the files saved for each plate
+output_suffixes = ["sc_annotated", "sc_normalized", "sc_feature_selected"]
+
 
 # ## Process data with pycytominer
 
-# In[ ]:
+# In[3]:
 
 
 # Load the platemap once since all plates share the same layout
@@ -85,6 +70,10 @@ platemap_df = pd.read_csv(platemap_path)
 
 for plate_id in plate_ids:
     print("Performing preprocessing on", plate_id)
+
+    output_annotated_file = output_dir / f"{plate_id}_sc_annotated.parquet"
+    output_normalized_file = output_dir / f"{plate_id}_sc_normalized.parquet"
+    output_feature_select_file = output_dir / f"{plate_id}_sc_feature_selected.parquet"
 
     profile_df = pd.read_parquet(qc_labeled_dir / f"{plate_id}_qc_labeled.parquet")
 
@@ -94,65 +83,55 @@ for plate_id in plate_ids:
         profile_df = profile_df[~profile_df[cqc_columns].any(axis=1)]
 
     # Step 1: Annotation
+    # (annotate also adds the Metadata_ prefix to the Image_Metadata_ columns)
     print("Performing annotation for", plate_id, "...")
-    annotated_df = annotate(
+    annotate(
         profiles=profile_df,
         platemap=platemap_df,
         join_on=["Metadata_well_position", "Image_Metadata_Well"],
+        output_file=output_annotated_file,
+        output_type="parquet",
     )
-
-    # Rename site column to have the Metadata prefix
-    annotated_df = annotated_df.rename(columns={"Image_Metadata_Site": "Metadata_Site"})
-    save_profile(annotated_df, f"{plate_id}_sc_annotated.parquet")
 
     # Step 2: Normalization
     print("Performing normalization for", plate_id, "...")
-    normalized_df = normalize(
-        profiles=annotated_df,
+    normalize(
+        profiles=output_annotated_file,
         method="standardize",
         samples="all",
+        output_file=output_normalized_file,
+        output_type="parquet",
     )
-    save_profile(normalized_df, f"{plate_id}_sc_normalized.parquet")
 
     # Step 3: Feature selection
     print("Performing feature selection for", plate_id, "...")
-    feature_selected_df = feature_select(
-        profiles=normalized_df,
+    feature_select(
+        profiles=output_normalized_file,
         operation=feature_select_ops,
         na_cutoff=0,
         blocklist_file="./blocklist_features.txt",
+        output_file=output_feature_select_file,
+        output_type="parquet",
     )
-    save_profile(feature_selected_df, f"{plate_id}_sc_feature_selected.parquet")
 
     print(f"Annotation, normalization, and feature selection complete for {plate_id}")
 
-print(f"All plates have been processed and saved to: {save_to}")
+print(f"All plates have been processed and saved to: {output_dir.resolve()}")
 
 
-# In[ ]:
+# ## Save a copy of the profiles to bandicoot
+
+# In[4]:
 
 
-# Check the feature-selected output file for each plate
 for plate_id in plate_ids:
-    test_df = pd.read_parquet(saved_dir / f"{plate_id}_sc_feature_selected.parquet")
-    print(plate_id, test_df.shape, "| Plate:", test_df.Metadata_Plate.unique())
+    for suffix in output_suffixes:
+        file_name = f"{plate_id}_{suffix}.parquet"
+        output(
+            df=pd.read_parquet(output_dir / file_name),
+            output_filename=bandicoot_output_dir / file_name,
+            output_type="parquet",
+        )
 
-print(
-    "Metadata columns:", [col for col in test_df.columns if col.startswith("Metadata_")]
-)
-test_df.head(2)
-
-
-# In[ ]:
-
-
-# Check the annotated output file for each plate
-for plate_id in plate_ids:
-    test_df = pd.read_parquet(saved_dir / f"{plate_id}_sc_annotated.parquet")
-    print(plate_id, test_df.shape, "| Plate:", test_df.Metadata_Plate.unique())
-
-print(
-    "Metadata columns:", [col for col in test_df.columns if col.startswith("Metadata_")]
-)
-test_df.head(2)
+print(f"Saved a copy of all profiles to: {bandicoot_output_dir}")
 

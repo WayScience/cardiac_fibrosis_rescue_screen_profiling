@@ -20,7 +20,7 @@ done
 echo "QC completed for all plates"
 
 # process single-cell and bulk profiles for every QC-labeled plate
-# (set save_to in each notebook to save locally, to bandicoot, or both)
+# (profiles are saved locally and a copy is saved to bandicoot)
 uv run --locked python nbconverted/2.single_cell_processing.py
 uv run --locked python nbconverted/3.bulk_processing.py
 
