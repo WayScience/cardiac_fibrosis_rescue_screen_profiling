@@ -56,10 +56,8 @@ bandicoot_output_dir = pathlib.Path(
     "~/mnt/bandicoot/CFReT_screening_data/validation_profiles/bulk_profiles/"
 ).expanduser()
 
-# Path to the platemap (all validation plates share the same layout)
-platemap_path = pathlib.Path(
-    "../metadata/platemaps/platemap_validation.csv"
-).resolve(strict=True)
+# Directory with one platemap per plate (named by plate barcode)
+platemap_dir = pathlib.Path("../metadata/platemaps/").resolve(strict=True)
 
 # Negative controls used as the reference population for normalization
 neg_control_query = "Metadata_treatment == 'DMSO' and Metadata_cell_type == 'failing'"
@@ -96,10 +94,12 @@ output_suffixes = ["bulk_annotated", "bulk_normalized", "bulk_feature_selected"]
 # In[3]:
 
 
-# Load the platemap once since all plates share the same layout
-platemap_df = pd.read_csv(platemap_path)
-
 for plate_id in plate_ids:
+    # Load the platemap for this plate (each plate has its own compounds)
+    platemap_df = pd.read_csv(
+        (platemap_dir / f"{plate_id}_platemap.csv").resolve(strict=True)
+    )
+
     print("Performing preprocessing on", plate_id)
 
     output_annotated_file = output_dir / f"{plate_id}_bulk_annotated.parquet"
