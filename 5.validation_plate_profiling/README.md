@@ -1,15 +1,16 @@
 # Validation plate profiling
 
-This module processes the validation plates with the same workflow as modules 2, 3, and 4, using the plate map in [`metadata/platemaps/`](./metadata/platemaps/).
-There are five replicate validation plates, which all share the same plate layout:
+This module processes the validation plates with the same workflow as modules 2, 3, and 4, using one plate map per plate in [`metadata/platemaps/`](./metadata/platemaps/).
+There are five validation plates. 
+They share the same well layout (controls and compound wells in the same positions), but each plate tests three different compounds:
 
-| Plate |
-| --- |
-| `CARD-CelIns-CX7_261030160001` |
-| `CARD-CelIns-CX7_261031160001` |
-| `CARD-CelIns-CX7_261101160003` |
-| `CARD-CelIns-CX7_261102080001` |
-| `CARD-CelIns-CX7_261102150001` |
+| Plate | Barcode | Compound A | Compound B | Compound C |
+| --- | --- | --- | --- | --- |
+| 1 | `CARD-CelIns-CX7_261030160001` | K310 | K543 | K278 |
+| 2 | `CARD-CelIns-CX7_261031160001` | K756 | K020 | K845 |
+| 3 | `CARD-CelIns-CX7_261101160003` | K463 | K208 | K779 |
+| 4 | `CARD-CelIns-CX7_261102080001` | K221 | K318 | K645 |
+| 5 | `CARD-CelIns-CX7_261102150001` | K504 | K687 | K191 |
 
 The compounds on these plates are drug hits from the screen, selected with our optimized hit-calling methodology.
 
