@@ -1,7 +1,8 @@
 # Validation plate profiling
 
 This module processes the validation plates with the same workflow as modules 2, 3, and 4, using one plate map per plate in [`metadata/platemaps/`](./metadata/platemaps/).
-There are five validation plates. They share the same well layout (controls and compound wells in the same positions), but each plate tests three different compounds:
+There are five validation plates. 
+They share the same well layout (controls and compound wells in the same positions), but each plate tests three different compounds:
 
 | Plate | Barcode | Compound A | Compound B | Compound C |
 | --- | --- | --- | --- | --- |

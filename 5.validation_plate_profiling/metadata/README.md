@@ -11,7 +11,8 @@ This folder holds one plate map per validation plate.
 
 ## Plate layout
 
-All five plates use the same 60 wells in the same layout. Only the compounds change from plate to plate.
+All five plates use the same 60 wells in the same layout. 
+Only the compounds change from plate to plate.
 
 - 3 compounds (A, B, C) on failing cells (heart 25, dilated cardiomyopathy), 8 wells each
 - DMSO on failing cells (heart 25), 18 wells: the negative control used for bulk normalization
