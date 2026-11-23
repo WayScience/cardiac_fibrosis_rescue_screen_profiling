@@ -204,17 +204,3 @@ for output_file in output_files:
 
 print(f"Saved a copy of {len(output_files)} bulk profiles to: {bandicoot_output_dir}")
 
-
-# In[6]:
-
-
-# Check the pooled output file
-test_df = pd.read_parquet(output_pooled_feature_select_file)
-
-print(test_df.shape)
-print("Plates:", test_df.Metadata_Plate.unique())
-print(
-    "Metadata columns:", [col for col in test_df.columns if col.startswith("Metadata_")]
-)
-test_df.head(2)
-
