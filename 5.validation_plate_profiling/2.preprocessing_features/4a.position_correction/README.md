@@ -36,6 +36,11 @@ This layout differs from the screen in three ways that matter for the correction
   An unconstrained fit splits those offsets between group and column effects arbitrarily, which changes the difference between the healthy and the failing controls.
   The fit has no reference column and a tiny ridge penalty on the column effects, which sets what the data cannot determine to zero and leaves the effects that they do determine as they are.
 
+**What the tilt is.** The correction subtracts from every feature a position effect, the sum of one effect for the row and one for the column of a well.
+The fit of a feature has one effect for each group (15 compounds and 2 kinds of DMSO), five row effects (rows C to G against row B), and ten column effects with a ridge penalty (reported against column 2): 32 parameters, of which three combinations are not determined by the layout.
+It is fit on the 17 groups, with the replicate plates averaged (36 DMSO positions and 15 compounds at 8 positions each), once for each of the 2,453 features.
+The group effects keep what a compound or a cell type does from being counted as position.
+
 ## Notebooks
 
 | Notebook | What it does | Screen counterpart |
@@ -62,39 +67,10 @@ Differences from the screen:
 | Held-out validation | leave one platemap out | leave one plate out (the tilt is fit on four plates and applied to the fifth) |
 | Figures of the principal components | the two components that plate row explains most | PC1, which plate row explains most and which is also the largest, and PC8, the next that plate row explains most |
 
-## Figures
-
-The figures are the five figures of the screen, for the validation plates.
-
-| Figure | What it shows |
-|---|---|
-| [`figures/fit/tilt_size_and_amplitudes.png`](./figures/fit/tilt_size_and_amplitudes.png) | The size of the tilt at every well position, and the amplitude of the tilt in each replicate plate |
-| [`figures/validation/row_prediction_validation.png`](./figures/validation/row_prediction_validation.png) | Held-out row prediction before and after the correction, per plate and pooled, against shuffled labels |
-| [`figures/effect/tilt_size_by_feature_family.png`](./figures/effect/tilt_size_by_feature_family.png) | Which features the position moves most, by compartment, measurement type, and channel |
-| [`figures/effect/well_pca_before_after_by_row.png`](./figures/effect/well_pca_before_after_by_row.png) | The wells in the principal components before and after the correction, with the displacement of the wells |
-| [`figures/effect/plate_layout_top_row_pc_before_after.png`](./figures/effect/plate_layout_top_row_pc_before_after.png) | The component that plate row explains most on the plate layout, before and after, for each replicate plate |
-
-[`figures/diagnostics/`](./figures/diagnostics/) has the figures of the diagnostics notebook. [`results/`](./results/) has the tables that later notebooks read (the fit, the effect on the feature space, and the row prediction); the other numbers are printed in the notebooks.
-
-[`figures/quantify/`](./figures/quantify/) has the figures of the notebook that quantifies the position effect:
-
-| Figure | What it shows |
-|---|---|
-| [`position_variance_by_feature.png`](./figures/quantify/position_variance_by_feature.png) | The share of the variation within the DMSO groups that is position, for every feature, uncorrected and after the in-sample and held-out corrections, and by channel and measurement type |
-| [`position_vs_biology.png`](./figures/quantify/position_vs_biology.png) | The healthy against failing DMSO difference on each plate, with and without the correction, next to the difference that the tilt predicts between the healthy and the failing positions |
-| [`tilt_cross_cell_type.png`](./figures/quantify/tilt_cross_cell_type.png) | Whether a tilt fit on the DMSO of one cell type predicts the position pattern of the other cell type |
-| [`plate_layout_well_deviation.png`](./figures/quantify/plate_layout_well_deviation.png) | For each plate, the distance of every DMSO well from the mean profile of its cell type, before and after the held-out correction |
-| [`tilt_terms_and_uncertainty.png`](./figures/quantify/tilt_terms_and_uncertainty.png) | The size of each of the 14 row and column terms of the tilt, with its uncertainty from leaving out each plate |
-
-[`figures/compare_to_screen/`](./figures/compare_to_screen/) has the figures of `6.compare_position_effects_in_validation_to_screen.ipynb` (see Comparison with the screen below):
-
-| Figure | What it shows |
-|---|---|
-| [`scree_position_and_heart_status.png`](./figures/compare_to_screen/scree_position_and_heart_status.png) | The variance of the first 20 principal components of the wells, with the part that plate position explains (red) and the part that heart status explains (blue), before and after the correction, for the screen (all wells, as in its own analysis) and the validation plates, on one y axis |
-| [`healthy_failing_survival.png`](./figures/compare_to_screen/healthy_failing_survival.png) | The length of the healthy against failing DMSO difference on every plate before and after the correction, and the share that survives for every screen platemap and for the validation plates |
-| [`screen_compound_placement.png`](./figures/compare_to_screen/screen_compound_placement.png) | The correlation between compound number and position on the plate for every screen platemap |
-
 ## What we found
+
+Every finding shows the figure that backs it. The figures are in [`figures/`](./figures/) (the five figures of the screen, for the validation plates, and the figures of `5.quantify_position_effect.ipynb` and `6.compare_position_effects_in_validation_to_screen.ipynb`).
+[`results/`](./results/) has the tables that later notebooks read; the other numbers are printed in the notebooks.
 
 **1. The validation plates have a strong position effect.**
 
@@ -106,6 +82,30 @@ The figures are the five figures of the screen, for the validation plates.
   After we average the five plates and remove the mean of each cell type, what remains differs only between the 36 positions, and PC1 of that (79%) is still 84% explained by row and 6% by column.
 - The effect is strongest in Actin features (median tilt size 0.34 standard deviations of a single cell, against 0.09 to 0.16 in the other channels) and in intensity and texture measurements, as in the screen.
 
+![Wells in the principal components of the uncorrected wells, by plate row and by plate column](./figures/diagnostics/well_pca_by_row_and_column.png)
+
+*Each point is a well, placed by its first two principal components and colored by plate row (left) or plate column (right); DMSO wells have an outline. The rows separate along PC1 and the columns do not.*
+
+![PC1 on the plate layout of each plate](./figures/diagnostics/plate_layout_top_row_pc.png)
+
+*PC1 at every plate position. The color changes from row to row (horizontal stripes), in the same way on all five plates.*
+
+![Size of the tilt by feature family](./figures/effect/tilt_size_by_feature_family.png)
+
+*How far plate position moves a feature, by compartment, measurement type, and channel. Actin, intensity, and texture features move the most.*
+
+*Compared with the screen.* We fit the components as the screen analysis does (for the screen, on all 2,088 wells) and show the first 20, on one y axis.
+In the screen, plate position (row plus column) is in PC2 and PC3: it explains 10% of PC2 and 27% of PC3 (row alone: 10% and 25%), and 4% of PC1.
+In all, it explains 6.8% of the total variance in the first 20 principal components of the screen wells (85.7% of the total variance), and 1.4% after the correction.
+On the validation plates it is in PC1, which holds 47.9% of the total variance, and position explains 34.4 points of it (21.1% of the total variance remain in PC1 after the correction, 8.1 points of it position).
+In all, position explains 43.2% of the total variance in the first 20 components of the validation wells (94.6% of the total variance), and 12.6% after the correction.
+Heart status (healthy against failing) explains 4.1% of the total variance before and after the correction on the validation plates, against 1.3% and 0.7% in the screen.
+The 12.6% after the correction is in-sample (see finding 7), so it is an optimistic figure; the held-out figure is in finding 5.
+
+![Variance of the principal components, split into position and heart status, in the screen and on the validation plates](./figures/compare_to_screen/scree_position_and_heart_status.png)
+
+*The variance of each principal component (grey), with the part that plate position explains (red) and the part that heart status explains (blue), before and after the correction. The screen is on top and the validation plates at the bottom.*
+
 **2. It goes partly through the number of cells.**
 The median number of cells in a DMSO well falls from 257 in row B and 260 in row C to 226 in row F and 203 in row G.
 Within a cell type, the cell number correlates with the row (-0.63 after the mean of the cell type is removed), and the cell type explains none of the variation in cell number.
@@ -113,10 +113,18 @@ In the failing DMSO wells, plate row explains 69% of PC1 and the log number of c
 In the healthy DMSO wells row explains 76%, cell number 33%, and together 81%.
 A correction by position removes the part that goes through position, and we do not model the cell number separately.
 
+![Variance explained by plate row and column, and cells per well by plate row](./figures/diagnostics/row_column_variance_and_cell_counts.png)
+
+*Left and middle: the fraction of each component that plate row and plate column explain, in the failing DMSO wells and in the DMSO wells without the cell-type effect. Right: cells per DMSO well by plate row.*
+
 **3. The five plates do not show the effect equally.**
 The amplitude of the tilt is 1.10 (plate 1), 0.92 (plate 2), 0.92 (plate 3), 0.96 (plate 4), and 0.71 (plate 5), with standard errors of 0.05 to 0.07.
 Plate 5 is about five standard errors away from 1, and plate 1 about two, so one tilt for all plates is an approximation.
 Like the screen, the correction uses each plate's amplitude shrunk toward the average of the others (1.05, 0.92, 0.92, 0.95, and 0.82).
+
+![Size of the tilt at every well position and amplitude of each plate](./figures/fit/tilt_size_and_amplitudes.png)
+
+*Left: the size of the tilt at every well position. Right: the amplitude of each plate with its standard error (blue) and after shrinking (orange).*
 
 **4. The correction works on held-out plates, but only partly.**
 The table gives the leave-one-plate-out result: the AUC of a classifier that predicts the plate row of the wells of a plate that neither the tilt nor the classifier saw (0.5 is chance; shuffled labels, repeated several times, give the floor).
@@ -133,31 +141,13 @@ The table gives the leave-one-plate-out result: the AUC of a classifier that pre
   The DMSO positions are the same on every plate, so a classifier can learn the pattern of a well from the other plates, which a row plus column tilt does not contain; we have not tested whether this is the reason.
   In the screen, the same test took the pooled AUC from 0.76 to 0.52.
 - On each plate separately, the AUC over the rows goes from 0.88 to 0.69 (plate 1), 0.88 to 0.79 (plate 2), 0.89 to 0.80 (plate 3), 0.84 to 0.85 (plate 4), and 0.81 to 0.81 (plate 5).
-- On the plates themselves (in-sample), the correction leaves 12.6% of the total variance of the first 20 principal components as position, against 43.2% before.
-  What remains is mostly column structure that is confounded with the groups (finding 5 and `3.effect_on_feature_space.ipynb`: after the correction, plate column explains 41% of PC1).
 - In a simulation on the real layout, the fit with one effect for each group recovers a known tilt (median cosine 0.95), and the screen's way of fitting, without group effects, reaches 0.78.
 
-**5. The correction does not change the healthy versus failing contrast.**
-The length of the healthy minus failing DMSO difference is 12.8 to 14.5 on every plate before the correction and the same after it (the share that survives is 1.00), and the tilt itself predicts no difference between the positions of the healthy and the failing wells.
-This is by design: the rows are balanced between the two cell types, and the fit does not split the column-block offsets between the group and the column effects.
-In the screen the median over plates is 0.84, but it hides large differences between platemaps: the correction makes the difference 1.5 to 2.1 times longer on platemaps 1 to 4, and keeps 0.40 to 0.85 of it on platemaps 5 to 11 (see [`6.compare_position_effects_in_validation_to_screen.ipynb`](./6.compare_position_effects_in_validation_to_screen.ipynb)).
+![Held-out row prediction before and after the correction](./figures/validation/row_prediction_validation.png)
 
-**6. The tilt of one cell type predicts the position pattern of the other well.**
-Both cell types are at 18 positions, so we fitted the tilt on the failing DMSO only and compared its prediction for the 18 healthy positions with what the healthy wells show (and the reverse).
-The cosine between the predicted and the observed pattern is 0.80 (fit on failing, predicts healthy) and 0.78 (the reverse), while two halves of the plates of the same cell type agree at 0.82 and 0.80, which is as high as any prediction can be at this noise.
-The prediction for the healthy wells has about the right size (slope 1.09), and the prediction for the failing wells has 0.78 of it.
-So position moves the two cell types in nearly the same way, and one shared tilt is a good approximation.
+*The AUC of the row classifier on the held-out plate, per plate (left) and pooled (right), for the uncorrected wells, the corrected wells, and shuffled labels.*
 
-**7. Some terms of the tilt are poorly determined.**
-Leaving out each plate in turn, the five terms of the rows C to G against row B are 5 to 7 times larger than their uncertainty.
-None of the nine column terms is more than 2 times its uncertainty (1.0 to 2.0), so the column effects are not determined by these plates, in line with the fact that they are confounded with the groups and do not carry over between plates.
-
-## Measuring the position effect directly
-
-[`5.quantify_position_effect.ipynb`](./5.quantify_position_effect.ipynb) measures the position effect with four measurements that need no classifier.
-The biology is removed by looking only at the DMSO wells of one cell type: they sit at the same 18 positions on each of the five plates, so the variation of a position mean is position, and the variation between plates at the same position is noise.
-
-**1. Position variation of the features.**
+**5. The position variation of the features falls, but does not vanish.**
 Of the variation within the DMSO groups, the share that is position (with the chance level subtracted) has a median of 0.26 per feature before the correction, and 55% of the features are above 0.2.
 After a tilt fit on all plates it is 0.10 (36% above 0.2), which a fit on its own data always favors.
 After a tilt that never saw the plate (held-out) it is 0.05 (28% above 0.2).
@@ -165,54 +155,81 @@ For a median feature with a clear position effect (share above 0.2, 1,335 featur
 Overall 14% of the position variation is left after the in-sample correction and 8% after the held-out one.
 The held-out figure being lower than the in-sample one is not credible as a real gain: the measure subtracts a noise level estimated from the differences between plates, and the five held-out corrections differ a little between plates, which adds to that noise.
 We take the two figures to be about equal, and the remaining position variation to be 8% to 14%.
+Of the 1,335 features with a clear position effect, 113 (8%) keep at least 80% of it after the held-out correction: 48 DNA, 29 without a channel, 13 ER, 12 Golgi, 5 multi-channel, 5 Mito, and 1 Actin feature.
 
-**2. Position against biology.**
-The length of the healthy against failing DMSO difference is 12.8 to 14.5 on the plates, before and after the correction (the share kept is 1.00), and the tilt itself differs by 0 between the healthy and the failing positions.
+![Position variation of every feature, before and after the correction, by channel and measurement type](./figures/quantify/position_variance_by_feature.png)
 
-**3. Does the tilt carry over between cell types?**
-See finding 6 above (`tilt_cross_cell_type.png`).
+*Left: the share of the variation that is position, for every feature, uncorrected (red), after the in-sample correction (grey), and after the held-out correction (blue). Middle and right: the median share by channel and by measurement type.*
 
-**4. Per plate.**
+**6. The wells at the top edge stay furthest from their cell type.**
 The mean distance of a DMSO well from the mean profile of its cell type is 19.4 in row B and 9.8 to 12.0 in the other rows before the correction, so the wells at the top edge of the plate sit furthest from the mean of their cell type.
 After the held-out correction it is 12.6 in row B and 9.2 to 11.2 in the others (row B keeps 65% of its distance, rows C to G 81% to 96%).
 The corrected distance is close to the noise between replicate plates, so only row B stands out, and it still does.
-The same pattern holds on all five plates ([`plate_layout_well_deviation.png`](./figures/quantify/plate_layout_well_deviation.png)).
+The same pattern holds on all five plates.
 
-## Comparison with the screen
+![Distance of every DMSO well from the mean of its cell type on each plate](./figures/quantify/plate_layout_well_deviation.png)
 
-[`6.compare_position_effects_in_validation_to_screen.ipynb`](./6.compare_position_effects_in_validation_to_screen.ipynb) runs the same measurements on the screen and on the validation plates.
+*The distance of each DMSO well from the mean profile of its cell type, on the layout of each plate: uncorrected (top), after the held-out correction (middle), and the difference (bottom). The compound wells are grey.*
 
-**What the tilt is.** The correction subtracts from every feature a position effect, the sum of one effect for the row and one for the column of a well.
-The fit of a feature has one effect for each group (15 compounds and 2 kinds of DMSO), five row effects (rows C to G against row B), and ten column effects with a ridge penalty (reported against column 2): 32 parameters, of which three combinations are not determined by the layout.
-It is fit on the 17 groups, with the replicate plates averaged (36 DMSO positions and 15 compounds at 8 positions each), once for each of the 2,453 features.
-The group effects keep what a compound or a cell type does from being counted as position.
+**7. On the plates the tilt was fit on, the row effect is gone.**
+Here the tilt was fit on the same wells that we look at (in-sample), which a fit on its own data always favors, so these figures show what the correction removes and not how it works on a new plate (findings 4 to 6 do that).
+Plate row explains 53% of PC1 and 6% of PC2 before the correction and 0% and 1% after it.
+The correction leaves 12.6% of the total variance of the first 20 principal components as position, against 43.2% before.
+What remains is mostly column structure that is confounded with the groups (the groups sit in blocks of columns, see the layout above; after the correction, plate column explains 41% of PC1; `3.effect_on_feature_space.ipynb`).
 
-**Variance of the principal components.**
-We fit the components as the screen analysis does (for the screen, on all 2,088 wells) and show the first 20, on one y axis.
-In the screen, plate position (row plus column) is in PC2 and PC3: it explains 10% of PC2 and 27% of PC3 (row alone: 10% and 25%), and 4% of PC1.
-In all, it explains 6.8% of the total variance in the first 20 principal components of the screen wells (85.7% of the total variance), and 1.4% after the correction.
-On the validation plates it is in PC1, which holds 47.9% of the total variance, and position explains 34.4 points of it (21.1% of the total variance remain in PC1 after the correction, 8.1 points of it position).
-In all, position explains 43.2% of the total variance in the first 20 components of the validation wells (94.6% of the total variance), and 12.6% after the correction.
-Heart status (healthy against failing) explains 4.1% of the total variance before and after the correction on the validation plates, against 1.3% and 0.7% in the screen.
-The 12.6% after the correction is in-sample, for the plates that the tilt was fit on, so it is an optimistic figure; the held-out figure is in `5.quantify_position_effect.ipynb`.
+![Wells in the principal components before and after the correction](./figures/effect/well_pca_before_after_by_row.png)
 
-**What the tilt estimates well.**
-The jackknife (leaving out each plate in turn) gives an uncertainty for each of the 14 position terms (finding 7).
+*Each well in PC1 and PC2 before (left) and after (middle) the correction, and the displacement of the wells (right).*
+
+![PC1 on the plate layout before and after the correction](./figures/effect/plate_layout_top_row_pc_before_after.png)
+
+*The mean PC1 score at every plate position, before (top) and after (bottom) the correction, for each plate and for all plates. The horizontal stripes of the plate-row effect are gone after the correction.*
+
+**8. The correction does not change the healthy versus failing contrast.**
+The length of the healthy minus failing DMSO difference is 12.8 to 14.5 on every plate before the correction and the same after it (the share that survives is 1.00), and the tilt itself predicts no difference between the positions of the healthy and the failing wells (it differs by 0).
+This is by design: the rows are balanced between the two cell types, and the fit does not split the column-block offsets between the group and the column effects.
+In the screen the median over plates is 0.84, but it hides large differences between platemaps: the correction makes the difference 1.5 to 2.1 times longer on platemaps 1 to 4, and keeps 0.40 to 0.85 of it on platemaps 5 to 11 (see [`6.compare_position_effects_in_validation_to_screen.ipynb`](./6.compare_position_effects_in_validation_to_screen.ipynb)).
+
+![Healthy against failing DMSO difference, with and without the correction](./figures/quantify/position_vs_biology.png)
+
+*The length of the healthy minus failing DMSO difference on each plate, before and after the correction.*
+
+![Survival of the healthy against failing difference in the screen and on the validation plates](./figures/compare_to_screen/healthy_failing_survival.png)
+
+*Left: the length of the difference on every plate, before and after the correction, in the screen and on the validation plates. Right: the share that survives.*
+
+**9. The tilt of one cell type predicts the position pattern of the other.**
+Both cell types are at 18 positions, so we fitted the tilt on the failing DMSO only and compared its prediction for the 18 healthy positions with what the healthy wells show (and the reverse).
+The cosine between the predicted and the observed pattern is 0.80 (fit on failing, predicts healthy) and 0.78 (the reverse), while two halves of the plates of the same cell type agree at 0.82 and 0.80, which is as high as any prediction can be at this noise.
+The prediction for the healthy wells has about the right size (slope 1.09), and the prediction for the failing wells has 0.78 of it.
+So position moves the two cell types in nearly the same way, and one shared tilt is a good approximation.
+
+![Does the tilt carry over between cell types?](./figures/quantify/tilt_cross_cell_type.png)
+
+*Left: the cosine between the predicted and the observed position pattern, against the ceiling that two halves of the plates reach. Right: the observed position of the healthy DMSO against the position that the tilt fit on the failing DMSO predicts (colored by plate row).*
+
+**10. Some terms of the tilt are poorly determined.**
+Leaving out each plate in turn, the five terms of the rows C to G against row B are 5 to 7 times larger than their uncertainty.
+None of the nine column terms is more than 2 times its uncertainty (1.0 to 2.0), so the column effects are not determined by these plates, in line with the fact that they are confounded with the groups and do not carry over between plates.
 The rows are well determined and the columns are not.
 
-**What generalizes.**
-For a tilt fit on all plates, 36% of the features keep a position share above 0.2, and for a tilt fit without the plate, 28% do (55% before the correction; see the caveat in the measurement above).
-Of the 1,335 features with a clear position effect (a share above 0.2 before the correction), 113 (8%) keep at least 80% of it after the held-out correction: 48 DNA, 29 without a channel, 13 ER, 12 Golgi, 5 multi-channel, 5 Mito, and 1 Actin feature.
+![Size of the 14 position terms of the tilt, with their uncertainty](./figures/quantify/tilt_terms_and_uncertainty.png)
 
-**Compound placement in the screen.**
+*The size of each row and column term of the tilt, with its uncertainty (bar) from leaving each plate out in turn.*
+
+**11. In the screen, compounds were not placed independently of position.**
 The number of the compound identifier rises with the position on the plate on platemaps 5, 7, 8, and 10 (Spearman correlation 0.49 to 0.71, p < 0.001), and does not on platemaps 1, 2, 3, 6, 9, and 11.
 The pathways do not differ by plate row (chi-square p = 0.62).
 So compounds were not placed independently of position on some platemaps, which the tilt of the screen assumes.
 
+![Correlation between compound number and plate position on each screen platemap](./figures/compare_to_screen/screen_compound_placement.png)
+
+*The Spearman correlation between the compound number and the position on the plate, for each screen platemap (red: p < 0.01).*
+
 ## Assumptions and limits
 
 - Position adds the same fixed vector to every cell of a well, the same for every compound and cell type (additive, no interaction of row and column, no effect that differs between compounds or cell types).
-  Finding 6 shows that the last part is only approximately true between the two cell types.
+  Finding 9 shows that the last part is only approximately true between the two cell types.
 - The five replicate plates share the DMSO layout, so they reduce noise, but the compounds are on one plate each.
   The compound effects are fit, not replicated, and the 8 positions of a compound (columns 5 to 8, in all six rows) are what separate its effect from position.
 - The groups sit in blocks of columns (failing DMSO in columns 2, 4, and 10, healthy DMSO in 3, 9, and 11, compounds in 5 to 8), so a column effect is confounded with the cell type and the compounds, and only the differences between columns inside a block are determined.
