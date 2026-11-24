@@ -6,7 +6,7 @@
 # This notebook puts the validation plates next to the screen, with the same measurements on both, to show why the plate-position correction removed most of the position effect in the screen and only part of it on the validation plates.
 # It changes no data: it reads the well medians and the fit of this step (`1.fit_position_correction.ipynb`) and of the screen (`4.image_based_profiling/3a.position_correction`).
 # 
-# 1. **Variance by principal component, split into position and heart status.** The principal components of the well profiles, with the part of each component that plate position (row plus column) explains in red and the part that the heart status of the cells (healthy against failing) explains in blue, before and after the correction.
+# 1. **Variance by principal component, split into position and heart status.** The principal components of the well profiles, with the part that is associated with plate position (row plus column, in red; row alone, in orange) and the part that is associated with the heart status of the cells (healthy against failing, in blue), before and after the correction. The parts overlap: they are associations and do not add up.
 # 2. **Survival of the healthy against failing difference.** The length of the difference between the healthy and the failing DMSO profile on every plate, before and after the correction.
 # 3. **Compound placement in the screen.** Whether the position of a compound on the screen platemaps is independent of the compound.
 # 
@@ -29,7 +29,7 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import chi2_contingency, spearmanr
+from scipy.stats import spearmanr
 
 sys.path.append("../../../utils")
 import position_correction_effect_utils as pce
@@ -87,15 +87,17 @@ for name, data in datasets.items():
 # For every component:
 # 
 # - the **grey bar** is the variance of the wells on the component, as a percentage of the total variance of the uncorrected wells;
-# - the **red bar** is the part of it that plate position explains, from an additive row plus column regression (adjusted R squared times the variance);
-# - the **blue bar** is the part that heart status explains (healthy against failing cells, R squared times the variance).
+# - the **red bar** is the part that is associated with plate position, from an additive row plus column regression (adjusted R squared times the variance);
+# - the **orange bar** is the part that is associated with plate row alone (the same regression with the rows only);
+# - the **blue bar** is the part that is associated with heart status (healthy against failing cells, squared correlation times the variance).
 # 
-# Heart status and position are partly confounded.
-# On the screen, the healthy wells are all in row B and the failing control wells in row E, so the blue bar before the correction also contains position.
-# On the validation plates the two cell types have the same number of wells in each of the six rows, so row does not confound heart status, but they sit in different blocks of columns (failing in columns 2, 4, and 10, healthy in 3, 9, and 11), so column does.
-# The validation fit uses the DMSO wells of both cell types, and what remains in the blue bar afterwards is the difference between healthy and failing cells that the position terms do not explain.
+# **The red and the blue bars overlap, and they do not add up.**
+# On the screen, the healthy wells are all in row B and the failing control wells in row E, so the blue bar contains position.
+# On the validation plates the two cell types have the same number of wells in each of the six rows, so row is not confounded with heart status, but they sit in different blocks of columns (failing in columns 2, 4, and 10, healthy in 3, 9, and 11), and the healthy label is exactly the sum of the indicators of columns 3, 9, and 11.
+# A component that follows only the healthy columns therefore scores 1 on both the red and the blue bar, and the blue bar is not variance that position does not explain.
+# The orange bar (row alone) is not confounded with heart status on the validation plates.
 # The red bar after the correction is the position variation that the fit leaves in the wells that it was fit on, which a fit on its own data always favors.
-# The position variation that the correction leaves in wells of a plate that it never saw is in section 3.
+# The position variation that the correction leaves in wells of a plate that it never saw is in `5.quantify_position_effect.ipynb`.
 
 # In[3]:
 
@@ -110,7 +112,7 @@ partitions = {
 for name, table in partitions.items():
     print(f"\n{name}: share of the variance of the first {n_components} components, by stage")
     print(
-        table.groupby("stage")[["variance_pct_of_total", "position_pct_of_total", "status_pct_of_total"]]
+        table.groupby("stage")[["variance_pct_of_total", "position_pct_of_total", "row_pct_of_total", "status_pct_of_total"]]
         .sum()
         .round(1)
         .to_string()
@@ -127,15 +129,16 @@ for i, (name, table) in enumerate(partitions.items()):
         subset = table[table["stage"] == stage]
         x = np.arange(len(subset))
         ax.bar(x, subset["variance_pct_of_total"], width=0.8, color=colors["total"], label="Variance of the component")
-        ax.bar(x - 0.19, subset["position_pct_of_total"], width=0.36, color=colors["position"], label="Explained by plate position (row + column)")
-        ax.bar(x + 0.19, subset["status_pct_of_total"], width=0.36, color=colors["status"], label="Explained by heart status (healthy vs failing)")
+        ax.bar(x - 0.27, subset["position_pct_of_total"], width=0.26, color=colors["position"], label="Associated with plate position (row + column)")
+        ax.bar(x, subset["row_pct_of_total"], width=0.26, color="#ff7f0e", label="Associated with plate row alone")
+        ax.bar(x + 0.27, subset["status_pct_of_total"], width=0.26, color=colors["status"], label="Associated with heart status (overlaps with position)")
         ax.set_xticks(x)
         ax.set_xticklabels(subset["component"], fontsize=9)
         ax.set_title(f"{name}, {'before' if stage == 'before' else 'after'} the correction", fontsize=11)
         if j == 0:
             ax.set_ylabel("% of the total variance")
 axes[0, 0].legend(fontsize=8, loc="upper right")
-fig.suptitle("Variance of the principal components of the wells, and how much of it position and heart status explain", fontsize=12)
+fig.suptitle("Variance of the principal components of the wells, and the parts associated with position and with heart status (the parts overlap)", fontsize=12)
 fig.tight_layout()
 fig.savefig(figure_dir / "scree_position_and_heart_status.png", dpi=150, bbox_inches="tight")
 plt.show()
@@ -146,7 +149,7 @@ plt.show()
 # For every plate, the length of the difference between the mean healthy DMSO profile and the mean failing DMSO profile (over all features, in standard deviations of a single cell), before and after the correction.
 # On the screen, the healthy controls are in row B and the failing controls in row E on every platemap, so the correction shifts the two controls differently.
 # On the validation plates both cell types sit in every row, at the same positions on every plate, so the tilt shifts the two controls alike and leaves their difference as it is.
-# The part of the difference that survives is what position does not explain.
+# The difference that survives is the one that is left after the fitted tilt is subtracted. It is not necessarily all biology: the fit leaves the offsets of the three blocks of columns in the group effects.
 
 # In[5]:
 
@@ -155,6 +158,12 @@ survival = {
     name: pce.healthy_failing_difference(data["medians"], data["fit"], data["healthy"])
     for name, data in datasets.items()
 }
+# a plate that has no healthy or no failing DMSO well with enough cells has no difference
+for name, table in survival.items():
+    excluded = table[table["raw"].isna()]
+    print(f"{name}: {len(table) - len(excluded)} of {len(table)} plates have both DMSO groups")
+    for row in excluded.itertuples():
+        print(f"  excluded {row.plate}: {row.n_healthy_dmso_wells} healthy and {row.n_failing_dmso_wells} failing DMSO wells")
 print(pd.DataFrame({name: table[["raw", "corrected", "share_that_survives"]].median() for name, table in survival.items()}).round(2).to_string())
 
 
@@ -184,9 +193,10 @@ for k, (name, table) in enumerate(survival.items()):
     ax.text(k + 0.34, median, f"median {median:.2f}", va="center", fontsize=10)
 ax.axhline(1, color="grey", ls="--", lw=1)
 ax.set_xlim(-0.6, 1.9)
-ax.set_ylim(0, 1.15)
+top = max(1.15, 1.08 * max(table["share_that_survives"].max() for table in survival.values()))
+ax.set_ylim(0, top)
 ax.set_xticks([0, 1])
-ax.set_xticklabels(["Screen\n(44 plates)", "Validation\n(5 plates)"])
+ax.set_xticklabels([f"{name}\n({table['raw'].notna().sum()} of {len(table)} plates)" for name, table in survival.items()])
 ax.set_ylabel("Share of the difference that survives the correction")
 ax.set_title("Corrected over uncorrected length", fontsize=10)
 fig.tight_layout()
@@ -198,7 +208,8 @@ plt.show()
 # 
 # The tilt of the screen, and its use in the rescue score, assume that compounds were placed on the plates independently of the position.
 # Each screen compound sits at one position of its platemap, so the assumption cannot be tested within a compound.
-# We test two things: whether the compound classes (pathways) differ by plate row, and whether the compound identifier (a running number) follows the order of the wells on a platemap.
+# We test two things: whether the compound classes (pathways) differ by plate row within the platemaps (a permutation test that shuffles the pathways within each platemap), and whether the compound identifier (a running number) follows the order of the wells on a platemap.
+# The controls (`DMSO` and `TGFRi`) are not compounds and are left out of both tests.
 
 # In[7]:
 
@@ -209,15 +220,21 @@ for path in sorted(platemap_dir.glob("*_with_pathways.csv")):
     frame["platemap"] = int(path.name.split("Plate_")[1].split("_")[0])
     frames.append(frame)
 platemaps = pd.concat(frames, ignore_index=True)
-screen_compounds = platemaps[(platemaps["treatment"] != "DMSO") & platemaps["treatment"].notna()].copy()
+screen_compounds = platemaps[~platemaps["treatment"].isin(pcu.CONTROL_TREATMENTS) & platemaps["treatment"].notna()].copy()
 screen_compounds["row_index"] = screen_compounds["well_position"].str[0].map({row: i for i, row in enumerate("BCDEFG")})
 screen_compounds["column"] = screen_compounds["well_position"].str[1:].astype(int)
 screen_compounds["reading_order"] = screen_compounds["row_index"] * 10 + screen_compounds["column"]
 screen_compounds["compound_number"] = screen_compounds["treatment"].str.extract(r"(\d+)")[0].astype(float)
 
-pathway_table = pd.crosstab(screen_compounds["Pathway"].fillna("none"), screen_compounds["well_position"].str[0])
-chi2, p_pathway, dof, _ = chi2_contingency(pathway_table)
-print(f"Pathway against plate row: chi-square p = {p_pathway:.2f} ({len(screen_compounds)} compounds, {pathway_table.shape[0]} pathways)")
+# the pathway against the plate row within each platemap (the platemaps are not pooled), with the
+# pathway labels permuted within each platemap
+statistic, p_pathway = pce.within_map_association_test(
+    screen_compounds["platemap"], screen_compounds["Pathway"].fillna("none"), screen_compounds["well_position"].str[0]
+)
+print(
+    f"Pathway against plate row within platemaps: statistic {statistic:.0f}, permutation p = {p_pathway:.3f} "
+    f"({len(screen_compounds)} compounds, {screen_compounds['Pathway'].nunique()} pathways)"
+)
 
 placement = []
 for platemap, group in screen_compounds.groupby("platemap"):
@@ -237,7 +254,13 @@ ax.bar(order["platemap"].astype(str), order["spearman_rho"], color=bar_colors)
 ax.axhline(0, color="black", lw=0.8)
 ax.set_xlabel("Screen platemap")
 ax.set_ylabel("Spearman correlation between compound number\nand position on the plate")
-ax.set_title("Compound number follows the position on the plate in platemaps 5, 7, 8, and 10 (red: p < 0.01)", fontsize=10)
+significant = order.loc[order["p_value"] < 0.01, "platemap"].astype(str).tolist()
+ax.set_title(
+    f"Compound number follows the position on the plate in platemaps {', '.join(significant)} (red: p < 0.01)"
+    if significant
+    else "Compound number does not follow the position on any platemap (red: p < 0.01)",
+    fontsize=10,
+)
 fig.tight_layout()
 fig.savefig(figure_dir / "screen_compound_placement.png", dpi=150, bbox_inches="tight")
 plt.show()

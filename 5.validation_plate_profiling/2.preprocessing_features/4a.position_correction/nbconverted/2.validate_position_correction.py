@@ -69,7 +69,9 @@ min_cells = 50  # minimum cells for a well to be used
 # In[3]:
 
 
-well_medians, features = vpu.load_or_build_well_medians(well_medians_cache, ".")
+well_medians, features = vpu.load_or_build_well_medians(
+    well_medians_cache, ".", platemap_dir="../../metadata/platemaps"
+)
 wells = well_medians[well_medians["n"] >= min_cells].reset_index(drop=True)
 rows, cols = pcu.well_index(wells["well"])
 is_dmso = (wells["treatment"] == "DMSO").to_numpy()
@@ -115,7 +117,9 @@ for label, subset in [("all wells", np.ones(len(wells), bool)), ("DMSO wells", i
                 "corrected": corrected[column],
                 "shuffled": floor[column].mean(),
                 "shuffled_sd": floor[column].std(),
-                "excess_auc_removed": (raw[column] - corrected[column]) / (raw[column] - floor[column].mean()),
+                "excess_auc_removed": (raw[column] - corrected[column]) / (raw[column] - floor[column].mean())
+                if raw[column] > floor[column].mean()
+                else np.nan,  # undefined when the raw AUC is not above the shuffled baseline
             }
         )
 results = pd.DataFrame(records)
@@ -131,11 +135,13 @@ print(results.round(3).to_string(index=False))
 
 
 per_plate = []
-for number, plate in enumerate(sorted(wells["plate"].unique()), start=1):
+# the plate number of the plate map, which does not depend on the other plates
+plate_numbers = wells.groupby("plate")["platemap"].first()
+for plate in sorted(wells["plate"].unique()):
     keep = (wells["plate"] == plate).to_numpy()
     per_plate.append(
         {
-            "plate_number": number,
+            "plate_number": int(plate_numbers[plate]),
             "plate": plate,
             "raw": vpu.row_prediction_scores(rows[keep], probabilities["raw"][keep])["macro_auc"],
             "corrected": vpu.row_prediction_scores(rows[keep], probabilities["corrected"][keep])["macro_auc"],
@@ -171,6 +177,8 @@ plt.show()
 # 
 # We simulate the five plates on their real layouts (the real healthy DMSO, failing DMSO, and compound positions) with a known tilt (a strong row B effect), a random effect for each group of wells (the healthy DMSO, the failing DMSO, and each compound), and measurement noise.
 # The fit should recover the tilt without removing the group effects.
+# The true column effects are centered within the three blocks of columns, because the layout cannot tell a block offset from the effect of the group in it (the tilt that the fit can recover).
+# We report the median cosine between the estimated and the true tilt and the scale of the estimate along the true tilt (the projection of the estimate on the true tilt, which is 1 for a tilt of the right size).
 # We compare the fit with one effect per group (`vpu.fit_compound_adjusted_tilt` with the controls) with a fit that has no group effects (a row plus column fit of all wells, as in the screen's `pcu.fit_tilt_map`), which counts the difference between the groups as position when the groups sit in different rows.
 
 # In[7]:
@@ -182,6 +190,12 @@ sim_features = [f"f{j}" for j in range(n_features)]
 
 true_row = rng.normal(0, 1, (6, n_features)) * np.array([3.0, 0.5, 0.2, 0.4, 0.4, 0.4])[:, None]
 true_col = rng.normal(0, 0.5, (10, n_features))
+# The layout cannot tell the offset of a block of columns from the effect of the group that sits in it
+# (failing DMSO in columns 2, 4, and 10, healthy DMSO in 3, 9, and 11, compounds in 5 to 8), and the fit
+# gives that offset to the group. The true column effects are therefore centered within each block: this
+# is the tilt that the fit can recover.
+for block in ([0, 2, 8], [1, 7, 9], [3, 4, 5, 6]):
+    true_col[block] -= true_col[block].mean(axis=0)
 group_effect = {}
 tables = []
 for plate_name in sorted(well_medians["plate"].unique()):
@@ -216,7 +230,7 @@ for label, estimated in [
     ("without group effects", without_group_effects),
 ]:
     cosine, scale = vpu.tilt_recovery(estimated, true_tilt, sim_rows, sim_cols)
-    print(f"{label}: median cosine to the true tilt {cosine:.2f}, estimated size / true size {scale:.2f}")
+    print(f"{label}: median cosine to the true tilt {cosine:.2f}, scale of the estimate along the true tilt {scale:.2f}")
 
 
 # ## What this does and does not show

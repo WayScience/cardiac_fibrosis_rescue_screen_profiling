@@ -18,7 +18,7 @@
 # 
 # 1. How much of the variation between wells depends on the plate row and column?
 # 2. Is this a position effect, and not the effect of the cell type or of the compounds?
-# 3. Does it work through the number of cells in the well?
+# 3. Is it associated with the number of cells in the well?
 # 
 # **Input**
 # 
@@ -60,7 +60,8 @@ import validation_position_utils as vpu
 # In[2]:
 
 
-# folder with the <plate>_sc_normalized.parquet files (only read when the well cache is missing)
+# folder with the <plate>_sc_normalized.parquet files (only read when the well cache is missing:
+# an existing well_medians.parquet is used whatever this folder is, so delete it when the profiles change)
 profile_dir = pathlib.Path(
     os.environ.get(
         "VALIDATION_PROFILE_DIR",
@@ -68,6 +69,9 @@ profile_dir = pathlib.Path(
     )
 ).expanduser()
 n_jobs = int(os.environ.get("N_JOBS", "4"))
+
+# plate maps, which give the plate number of every plate
+platemap_dir = pathlib.Path("../../metadata/platemaps")
 
 output_dir = pathlib.Path(".")
 figure_dir = output_dir / "figures" / "diagnostics"
@@ -93,7 +97,7 @@ row_colors = plt.cm.viridis(np.linspace(1, 0, pcu.N_ROW_TERMS))
 
 
 well_medians, features = vpu.load_or_build_well_medians(
-    well_medians_cache, profile_dir, n_jobs=n_jobs
+    well_medians_cache, profile_dir, n_jobs=n_jobs, platemap_dir=platemap_dir
 )
 
 well_medians["row"], well_medians["col"] = pcu.well_index(well_medians["well"])
@@ -130,8 +134,13 @@ print(
 
 plates = sorted(well_medians["plate"].unique())
 dmso_layout = well_medians[well_medians["kind"] != "compound"]
-positions_per_plate = dmso_layout.groupby("plate")["well"].apply(lambda wells: tuple(sorted(wells)))
-print("DMSO positions identical on all plates:", positions_per_plate.nunique() == 1)
+# the positions of each cell type of DMSO on every plate (a plate that swapped the two cell types at the
+# same wells would have the same set of DMSO wells, so the two kinds are compared one by one)
+positions = dmso_layout.groupby(["kind", "plate"])["well"].apply(lambda wells: tuple(sorted(wells)))
+print(
+    "DMSO positions of each cell type identical on all plates:",
+    bool((positions.groupby("kind").nunique() == 1).all() and positions.groupby("kind").size().eq(len(plates)).all()),
+)
 print(
     pd.crosstab(
         dmso_layout[dmso_layout["plate"] == plates[0]]["kind"],
@@ -159,11 +168,11 @@ print("Plates of each compound:", well_medians.loc[well_medians["kind"] == "comp
 # We fit the principal components on the uncorrected wells.
 # For each component we report the fraction of its variance that each factor explains.
 # A factor with `k` groups explains about `(k - 1) / (n - 1)` of a component by chance.
-# With the 300 wells that is about 2% for the six rows and 3% for the ten columns; with the 90 wells of one kind of DMSO it is about 6% and 10%; with the 36 averaged positions of the last analysis it is about 14% and 26%.
+# With the 300 wells that is about 2% for the six rows and 3% for the ten columns; with the 90 wells of one kind of DMSO it is about 6% for the six rows and 2% for the three columns that the cell type occupies; with the 36 averaged positions of the last analysis it is about 14% for the six rows and 14% for the six columns that they occupy.
 # Values well above these mean structure.
 # 
 # - **Plate row and column:** the position.
-# - **Treatment:** which compound, or the DMSO of which cell type, the well holds.
+# - **Treatment group:** which compound, or the DMSO of which cell type, the well holds.
 # - **Plate:** which of the five replicate plates the well comes from.
 # 
 # We repeat the analysis four ways:
@@ -177,8 +186,11 @@ print("Plates of each compound:", well_medians.loc[well_medians["kind"] == "comp
 
 
 wells = well_medians[well_medians["n"] >= min_cells].reset_index(drop=True)
+# the treatment group: the compound, or the DMSO of one cell type (both are "DMSO" in the treatment column)
+wells["treatment_group"] = np.where(wells["kind"] == "compound", wells["treatment"], wells["kind"])
 all_table, all_pca, all_scores = pce.pc_variance_table(
-    wells, wells[features].to_numpy(float), "all wells", n_components, random_state
+    wells, wells[features].to_numpy(float), "all wells", n_components, random_state,
+    factors=("row", "col", "plate", "treatment_group"),
 )
 
 failing_wells = wells[wells["kind"] == "failing DMSO"].reset_index(drop=True)
@@ -264,7 +276,8 @@ print(
 # ## Is it the plate position or the number of cells?
 # 
 # The number of cells per well changes with the row, and the first component correlates with it.
-# Position and cell number can both explain a component, and the two are related (edge wells grow differently).
+# Position and cell number can both be associated with a component, and the two are related (edge wells grow differently).
+# This comparison shows that each adds to the other as an association. It does not show that position acts through the cell number: the cell number could respond to position, or both could respond to something else.
 # For the first three components of the DMSO wells of each cell type, we compare how much of the component each explains alone (R squared of a linear model) and together.
 # If the row adds to the cell number (and the other way around), the two effects are not the same thing.
 # We repeat the comparison without the cell-type effect (five plates averaged, cell-type mean removed).
@@ -400,7 +413,7 @@ plt.show()
 # - A component that plate row explains much more than by chance in the DMSO wells of one cell type, and also **without the cell-type effect**, is a position effect.
 # - Healthy and failing DMSO cover all six rows equally (three wells of each kind in every row of a plate), so a row effect cannot masquerade as the cell type.
 #   They sit in different blocks of columns, though, so a column effect is confounded with the cell type (and with the compounds, which are in columns 5 to 8): `1.fit_position_correction.ipynb` explains how the fit handles that.
-# - The number of cells per well changes with the row, and each adds to the other as an explanation of the first component.
-#   Part of the position effect travels through the number of cells, and a correction by position removes that part too.
+# - The number of cells per well changes with the row, and each adds to the other as an association with the first component.
+#   This is an association and not a pathway: it does not show that position acts through the cell number. A correction by position removes the part of the cell-number pattern that follows position too.
 # - The compounds are on one plate each, in columns 5 to 8, so no compound is replicated.
 #   The DMSO wells are the replicated positions, and every statement about position that needs replicates rests on them.

@@ -12,7 +12,7 @@
 # 
 # 1. **Position variation of every feature.** The share of the variation within each cell type of DMSO that is position, with the chance level subtracted (`vpu.position_variance_share`), on the uncorrected wells, after a tilt fit on all plates (in-sample, which a fit on its own data always favors), and after a tilt fit on the other four plates (held-out, `vpu.leave_one_plate_out_correction`).
 # 2. **Position against biology.** The size of the healthy against failing DMSO difference on each plate, with and without the correction, next to the difference that the tilt predicts between the healthy and the failing positions.
-# 3. **Does the tilt carry over between cell types?** The correction assumes position moves healthy and failing cells equally. Both cell types sit at many positions, so we fit the tilt on the failing DMSO only and check whether it predicts the position pattern of the healthy DMSO, and the other way round.
+# 3. **Does the row effect carry over between cell types?** The correction assumes position moves healthy and failing cells equally. The failing DMSO sits in columns 2, 4, and 10 and the healthy DMSO in columns 3, 9, and 11, so a tilt fit on one cell type has no column effect for the other and can only be tested on the rows. We fit the tilt on the failing DMSO only and check whether its row effects predict the row pattern of the healthy DMSO, and the other way round. This layout cannot test whether the column effects carry over.
 # 4. **Per plate.** The distance of every DMSO well from the mean of its cell type, on the layout of each plate, before and after the held-out correction.
 # 5. **How well the tilt terms are determined.** The size of each row and column term of the tilt, with its uncertainty from leaving each plate out in turn.
 # 
@@ -64,7 +64,9 @@ colors = {"raw": "#d62728", "in_sample": "#7f7f7f", "held_out": "#1f77b4"}
 
 
 fit = pcu.load_fit(fit_path)
-well_medians, features = vpu.load_or_build_well_medians(well_medians_cache, ".")
+well_medians, features = vpu.load_or_build_well_medians(
+    well_medians_cache, ".", platemap_dir="../../metadata/platemaps"
+)
 features = [feature for feature in fit["features"] if feature in well_medians.columns]
 feature_index = [list(fit["features"]).index(feature) for feature in features]
 coef, center = fit["coef"][:, feature_index], fit["center"][feature_index]
@@ -188,6 +190,7 @@ print(f"Plate-averaged healthy minus failing difference: {pooled_raw:.1f} before
 # In[7]:
 
 
+largest_change = (position_vs_biology["raw"] - position_vs_biology["corrected"]).abs().max()
 fig, ax = plt.subplots(figsize=(8, 5.2))
 x = np.arange(len(position_vs_biology))
 ax.bar(x - 0.2, position_vs_biology["raw"], 0.4, color=colors["raw"], label="Uncorrected")
@@ -201,7 +204,7 @@ ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, fontsize=9, fr
 fig.text(
     0.5,
     0.01,
-    f"The length of the healthy against failing positions in the tilt is {tilt_healthy_vs_failing:.1f}, so the correction leaves this difference unchanged.",
+    f"The tilt predicts a healthy against failing difference of {tilt_healthy_vs_failing:.1f}; the correction changes the difference of a plate by at most {largest_change:.0e}.",
     ha="center",
     fontsize=8,
 )
@@ -210,13 +213,17 @@ fig.savefig(figure_dir / "position_vs_biology.png", dpi=150)
 plt.show()
 
 
-# ## 3. Does the tilt carry over between cell types?
+# ## 3. Does the row effect carry over between cell types?
 # 
 # The correction subtracts one tilt from healthy and failing cells.
 # That is right only if position moves both cell types in the same way.
-# The two cell types sit at different positions (18 each), so we can test it: fit the tilt on the wells of one cell type only, predict the pattern across the positions of the other cell type, and compare it with the pattern that the wells show.
+# The failing DMSO is in columns 2, 4, and 10 and the healthy DMSO in columns 3, 9, and 11, so a tilt fit on the wells of one cell type has no observation for the columns of the other.
+# The ridge sets those column effects to zero, and what the fit predicts for the other cell type varies only by row.
+# We therefore compare the row patterns: the tilt fit on one cell type predicts the effect of each of the six rows, and we compare it with the mean profile of each row in the other cell type.
+# **This layout cannot test whether the column effects carry over between cell types.**
 # 
-# For each direction we report the cosine between the predicted and the observed pattern (1 is a perfect match), the slope of the observed on the predicted pattern (1 means the right size), and a ceiling for the cosine: the cosine between the patterns of two halves of the plates (plates 1, 3, 5 against plates 2, 4), which is as high as any prediction can be given the noise.
+# For each direction we report the cosine between the predicted and the observed row pattern (1 is a perfect match), the slope of the observed on the predicted pattern (1 means the right size), and a noise reference: the cosine between the row patterns of two halves of the plates (plates 1, 3, 5 against plates 2, 4).
+# The reference shows how well two independent measurements of the same cell type agree, and it is not an upper bound for the cosine of the prediction.
 
 # In[8]:
 
@@ -230,17 +237,14 @@ for source, target in ((FAILING, HEALTHY), (HEALTHY, FAILING)):
     source_wells = dmso[dmso["cell_type"] == source]
     tilt_fit = vpu.fit_compound_adjusted_tilt(source_wells, features, min_cells, include_controls=True)
     target_wells = dmso[dmso["cell_type"] == target]
-    positions, observed = vpu.mean_position_pattern(target_wells, features)
-    t_rows, t_cols = pcu.well_index(pd.Series(positions))
-    predicted = pcu.tilt(tilt_fit["coef"], tilt_fit["center"], t_rows, t_cols)
-    predicted = predicted - predicted.mean(axis=0)
+    row_labels, observed = vpu.mean_row_pattern(target_wells, features)
+    predicted = vpu.tilt_row_pattern(tilt_fit)
     cosine, slope = vpu.cosine_and_slope(observed, predicted)
+    # noise reference: the row patterns of two halves of the plates
     half_a = target_wells[target_wells["plate"].isin(plate_order[0::2])]
     half_b = target_wells[target_wells["plate"].isin(plate_order[1::2])]
-    _, pattern_a = vpu.mean_position_pattern(half_a, features)
-    _, pattern_b = vpu.mean_position_pattern(half_b, features)
-    ceiling, _ = vpu.cosine_and_slope(pattern_a, pattern_b)
-    records.append({"fit_on": source, "predicts": target, "cosine": cosine, "slope": slope, "ceiling_cosine": ceiling, "n_positions": len(positions)})
+    agreement, _ = vpu.cosine_and_slope(vpu.mean_row_pattern(half_a, features)[1], vpu.mean_row_pattern(half_b, features)[1])
+    records.append({"fit_on": source, "predicts": target, "cosine": cosine, "slope": slope, "half_agreement_cosine": agreement, "n_rows": len(row_labels)})
 cross = pd.DataFrame(records)
 print(cross.round(2).to_string(index=False))
 
@@ -252,32 +256,31 @@ fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
 ax = axes[0]
 x = np.arange(len(cross))
 ax.bar(x - 0.2, cross["cosine"], 0.4, color=colors["held_out"], label="Cosine of the prediction")
-ax.bar(x + 0.2, cross["ceiling_cosine"], 0.4, color="#bdbdbd", label="Ceiling (two halves of the plates)")
+ax.bar(x + 0.2, cross["half_agreement_cosine"], 0.4, color="#bdbdbd", label="Agreement of two halves of the plates")
+ax.axhline(0, color="black", lw=0.8)
 ax.set_xticks(x)
 ax.set_xticklabels([f"Fit on {a}\npredicts {b}" for a, b in zip(cross["fit_on"], cross["predicts"])])
-ax.set_ylim(0, 1.2)
-ax.set_ylabel("Cosine between predicted and observed position pattern")
-ax.set_title("Does the tilt carry over between cell types?")
+ax.set_ylim(-1.05, 1.3)
+ax.set_ylabel("Cosine between predicted and observed row pattern")
+ax.set_title("Does the row effect carry over between cell types?")
 ax.legend(fontsize=9, loc="upper center", ncol=2)
 ax = axes[1]
-source_wells = dmso[dmso["cell_type"] == FAILING]
-tilt_fit = vpu.fit_compound_adjusted_tilt(source_wells, features, min_cells, include_controls=True)
-positions, observed = vpu.mean_position_pattern(dmso[dmso["cell_type"] == HEALTHY], features)
-t_rows, t_cols = pcu.well_index(pd.Series(positions))
-predicted = pcu.tilt(tilt_fit["coef"], tilt_fit["center"], t_rows, t_cols)
-predicted = predicted - predicted.mean(axis=0)
+tilt_fit = vpu.fit_compound_adjusted_tilt(dmso[dmso["cell_type"] == FAILING], features, min_cells, include_controls=True)
+row_labels, observed = vpu.mean_row_pattern(dmso[dmso["cell_type"] == HEALTHY], features)
+predicted = vpu.tilt_row_pattern(tilt_fit)
 direction = np.linalg.svd(predicted, full_matrices=False)[2][0]
 row_colors = dict(zip(pcu.ROWS, plt.get_cmap("viridis")(np.linspace(1, 0, pcu.N_ROW_TERMS))))
-for position, px, py in zip(positions, predicted @ direction, observed @ direction):
-    ax.scatter(px, py, color=row_colors[position[0]], s=45)
+for row, px, py in zip(row_labels, predicted @ direction, observed @ direction):
+    ax.scatter(px, py, color=row_colors[row], s=60)
+    ax.annotate(row, (px, py), textcoords="offset points", xytext=(6, 4), fontsize=9)
 limit = max(abs(predicted @ direction).max(), abs(observed @ direction).max()) * 1.1
 ax.plot([-limit, limit], [-limit, limit], color="black", lw=0.8, ls="--")
 ax.set_xlabel("Predicted by the tilt fit on the failing DMSO")
 ax.set_ylabel("Observed in the healthy DMSO")
-ax.set_title("Healthy DMSO positions on the main direction of the tilt (color: plate row B to G)")
+ax.set_title("Healthy DMSO rows on the main direction of the row effect")
 ax.title.set_size(9)
 fig.tight_layout()
-fig.savefig(figure_dir / "tilt_cross_cell_type.png", dpi=150)
+fig.savefig(figure_dir / "row_effect_cross_cell_type.png", dpi=150)
 plt.show()
 
 
@@ -357,6 +360,8 @@ plt.show()
 # 
 # **How well each term is determined.** We refit the tilt five times, each time without one plate, and measure how much every row and column term changes (the jackknife standard error).
 # A term whose estimate changes as much as its own size is not determined by these plates.
+# 
+# **Which terms the layout identifies.** The row terms are identified. A column term is identified only against a column of the same block (failing DMSO in columns 2, 4, and 10, healthy DMSO in 3, 9, and 11, compounds in 5 to 8), so `Column 4 vs 2` and `Column 10 vs 2` are. The other column terms cross two blocks: adding a constant to the healthy columns and subtracting it from the healthy DMSO group effect leaves every fitted profile unchanged, but it changes `Column 3 vs 2`. Those terms depend on the ridge convention, and a small jackknife uncertainty only shows that they are stable under that convention, not that the layout determines them.
 
 # In[12]:
 
@@ -382,7 +387,12 @@ term_table = pd.DataFrame(
     }
 )
 term_table["size_over_uncertainty"] = term_table["size"] / term_table["uncertainty"]
-term_table.round(2)
+# column terms are identified only against a column of the same block (column 2 is a failing DMSO column)
+failing_columns = {2, 4, 10}
+term_table["identified"] = [
+    name.startswith("Row") or int(name.split()[1]) in failing_columns for name in term_table["term"]
+]
+print(term_table.round(2).to_string(index=False))
 
 
 # In[13]:
@@ -391,12 +401,16 @@ term_table.round(2)
 fig, ax = plt.subplots(figsize=(8, 6))
 y = np.arange(len(term_table))[::-1]
 term_colors = ["#6a3d9a" if name.startswith("Row") else "#ff7f00" for name in term_table["term"]]
-ax.barh(y, term_table["size"], color=term_colors, alpha=0.85)
+bars = ax.barh(y, term_table["size"], color=term_colors, alpha=0.85)
+for bar, identified in zip(bars, term_table["identified"]):
+    if not identified:
+        bar.set_hatch("//")
+        bar.set_alpha(0.45)
 ax.errorbar(term_table["size"], y, xerr=term_table["uncertainty"], fmt="none", ecolor="black", capsize=3, lw=1.2)
 ax.set_yticks(y)
 ax.set_yticklabels(term_table["term"])
 ax.set_xlabel("Size of the term (length over features), with its uncertainty (bar) from leaving out each plate")
-ax.set_title("The 14 position terms of the tilt on the validation plates (purple: rows, orange: columns)", fontsize=10)
+ax.set_title("The 14 position terms of the tilt (purple: rows, orange: columns; hatched: depends on the ridge convention)", fontsize=9)
 fig.tight_layout()
 fig.savefig(figure_dir / "tilt_terms_and_uncertainty.png", dpi=150, bbox_inches="tight")
 plt.show()
