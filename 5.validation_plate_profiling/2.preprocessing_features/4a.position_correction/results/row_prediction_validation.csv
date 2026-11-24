@@ -1,0 +1,5 @@
+wells,measure,raw,corrected,shuffled,shuffled_sd,excess_auc_removed
+all wells,macro AUC over the rows,0.853,0.783,0.499,0.024,0.197
+all wells,row B against the rest,0.979,0.736,0.454,0.09,0.462
+DMSO wells,macro AUC over the rows,0.873,0.887,0.509,0.021,-0.038
+DMSO wells,row B against the rest,0.99,0.853,0.435,0.094,0.247

@@ -1,0 +1,846 @@
+"""Estimate and test a plate-position correction for the validation plates.
+
+The screen estimates a plate-position effect (a "tilt": an additive row plus column effect
+for every feature) from compounds that were placed at random on 11 platemaps
+(``position_correction_utils``).
+The validation plates have one layout, shared by five replicate plates: both kinds of DMSO
+(healthy and failing cells) in blocks of columns over all rows, and 15 compounds in
+columns 5 to 8, three on each plate at positions that differ between plates.
+Compounds do not average out of a tilt estimate with so few compounds, but every group of
+wells (a compound, or a kind of DMSO) sits at several positions, so we fit one effect per
+group together with the tilt (``fit_compound_adjusted_tilt``).
+The strength of the tilt differs between plates, so every plate has its own amplitude, like
+the platemaps of the screen (``shrunk_plate_amplitudes``).
+
+The validation plates keep their own feature names (the d2 channel is ``Golgi``), and the
+tilt is fit on the validation plates only.
+
+This module holds what is specific to the validation plates.
+It reuses ``position_correction_utils`` and ``position_correction_effect_utils`` wherever
+it can, so the validation plates are processed like the screen: the fit has the same
+format (``coef``, ``center``, ``features`` and ``amplitudes``), so
+``position_correction_utils.save_fit``, ``load_fit`` and ``correct_cells`` work with it.
+"""
+
+import pathlib
+from collections.abc import Callable, Sequence
+
+import numpy as np
+import pandas as pd
+import position_correction_effect_utils as pce
+import position_correction_utils as pcu
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+HEALTHY_CELL_TYPE = "nonfailing"  # the screen calls this "healthy"
+FAILING_CELL_TYPE = "failing"
+N_ROWS = len(pcu.ROWS)
+# the channels of the validation plates (the d2 channel is Golgi, and PM in the screen)
+CHANNELS = ("Actin", "DNA", "ER", "Mito", "Golgi")
+
+
+def discover_validation_profiles(
+    profile_dir: str | pathlib.Path, suffix: str = "_sc_normalized.parquet"
+) -> pd.DataFrame:
+    """Find the single-cell profile file of every validation plate.
+
+    Looks for ``<plate><suffix>`` directly in ``profile_dir``.
+    The result has the layout that ``position_correction_utils.build_well_medians``
+    expects, with the plate number (1 to 5, in the order of the plate names) as the platemap number, the
+    key of the amplitude of the plate in the fit.
+
+    Parameters
+    ----------
+    profile_dir : str | pathlib.Path
+        Folder with the single-cell profile files of the validation plates.
+    suffix : str, optional
+        End of the file names, by default ``"_sc_normalized.parquet"``.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per plate, sorted by plate name, with the columns ``plate`` (str),
+        ``platemap`` (int) and ``path`` (pathlib.Path).
+        The table is empty, with no columns, when no file matches.
+    """
+    records = [
+        {
+            "plate": path.name.removesuffix(suffix),
+            "platemap": number,
+            "path": path,
+        }
+        for number, path in enumerate(
+            sorted(pathlib.Path(profile_dir).glob(f"*{suffix}")), start=1
+        )
+    ]
+    return pd.DataFrame(records)
+
+
+def load_or_build_well_medians(
+    cache_path: str | pathlib.Path,
+    profile_dir: str | pathlib.Path,
+    n_jobs: int = 1,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Load the median profile of every well, or build it from the single-cell profiles.
+
+    Reading the five plates takes a few minutes, so the table is cached in a parquet file.
+    When the cache is missing, the function summarizes every well of every plate as the
+    median profile of its cells (``position_correction_utils.build_well_medians``, which
+    drops the features with a missing value in any well) and saves the cache.
+    Delete the cache when the single-cell profiles change.
+
+    Parameters
+    ----------
+    cache_path : str | pathlib.Path
+        Parquet file of the well medians.
+    profile_dir : str | pathlib.Path
+        Folder with the ``<plate>_sc_normalized.parquet`` files, only read when the cache
+        is missing.
+    n_jobs : int, optional
+        Number of plates to read in parallel, by default 1.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, list[str]]
+        The well table, with one row per plate and well and the columns ``plate``,
+        ``platemap``, ``well``, ``treatment``, ``cell_type``, ``n`` (the number of cells in
+        the well) and the features, and the list of feature names.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the cache is missing and ``profile_dir`` has no profile files.
+    """
+    cache_path = pathlib.Path(cache_path)
+    meta_columns = ["plate", "platemap", "well", "treatment", "cell_type", "n"]
+    if cache_path.exists():
+        well_medians = pd.read_parquet(cache_path)
+        return well_medians, [c for c in well_medians.columns if c not in meta_columns]
+    plate_table = discover_validation_profiles(
+        pathlib.Path(profile_dir).resolve(strict=True)
+    )
+    if plate_table.empty:
+        raise FileNotFoundError(f"No *_sc_normalized.parquet files in {profile_dir}")
+    well_medians, features = pcu.build_well_medians(plate_table, n_jobs=n_jobs)
+    well_medians.to_parquet(cache_path, index=False)
+    return well_medians, features
+
+
+def fit_compound_adjusted_tilt(
+    well_medians: pd.DataFrame,
+    features: Sequence[str],
+    min_cells: int = 50,
+    include_controls: bool = False,
+    ridge: float = 1e-6,
+) -> dict:
+    """Fit a tilt map that accounts for the effect of each group of wells.
+
+    The screen places every compound at one position, so it can only average compound
+    effects out over many compounds.
+    Here every group of wells (a compound, or with ``include_controls`` the healthy DMSO
+    and the failing DMSO) sits at several positions, so we fit one effect for each group
+    together with an additive row plus column effect per feature::
+
+        profile(group, row, column) = group_effect(group)
+                                      + row_effect(row) + column_effect(column)
+
+    The group effect absorbs everything that is the same for all wells of a group, and the
+    row and column effects are what differs between the positions of a group.
+    The column effects have no reference column.
+    When the groups sit in blocks of columns (for example the failing DMSO only in columns
+    2, 4, and 10, the healthy DMSO in columns 3, 9, and 11, and the compounds in columns 5
+    to 8), a group effect can absorb the offset of its block of columns, so those offsets
+    cannot be estimated and an unconstrained fit splits them between group and column
+    effects arbitrarily, which distorts the difference between the groups.
+    A tiny ridge penalty on the column effects (``ridge``) sets what the data cannot tell
+    to zero, so the group effects keep the differences between groups; the effects that the
+    data do determine are unchanged.
+    The fit has the same two passes as ``position_correction_utils.fit_tilt_map``
+    (least squares, then a refit after winsorizing the residuals at three robust standard
+    deviations), and it averages the replicate wells of a group (the same position on the
+    replicate plates) first.
+
+    Parameters
+    ----------
+    well_medians : pd.DataFrame
+        Well medians of the validation plates (``load_or_build_well_medians``).
+    features : Sequence[str]
+        Features to model.
+    min_cells : int, optional
+        Minimum number of cells for a well to be used, by default 50.
+    include_controls : bool, optional
+        Whether the DMSO wells enter the fit, as two groups (healthy and failing cells).
+        By default only the compound wells do, one group for each compound. The corrected
+        layout of the validation plates has the controls of both cell types at many rows
+        and columns, so the fit needs them to see rows B and G.
+    ridge : float, optional
+        Ridge penalty on the column effects, by default 1e-6 (small enough not to change
+        the effects the data determine).
+
+    Returns
+    -------
+    dict
+        The keys ``coef`` and ``center`` (a tilt map in the layout of
+        ``position_correction_utils``, so ``position_correction_utils.tilt`` works with it,
+        with the tilt averaging to zero over the wells that the tilt map was fit on) and
+        ``features``.
+    """
+    features = list(features)
+    wells = well_medians[well_medians["n"] >= min_cells]
+    if include_controls:
+        group = wells["treatment"] + "|" + wells["cell_type"]
+    else:
+        wells = wells[~wells["treatment"].isin(pcu.CONTROL_TREATMENTS)]
+        group = wells["treatment"]
+    averaged = (
+        wells.assign(group=group)
+        .groupby(["group", "well"])[features]
+        .mean()
+        .reset_index()
+    )
+    rows, cols = pcu.well_index(averaged["well"])
+    groups = sorted(averaged["group"].unique())
+
+    group_terms = (averaged["group"].to_numpy()[:, None] == np.array(groups)).astype(float)
+    # row B (index 0) is the reference row (the group terms are the intercept); the columns
+    # have one term each, with a ridge penalty instead of a reference column
+    row_terms = np.eye(pcu.N_ROW_TERMS)[rows][:, 1:]
+    n_columns = pcu.N_COL_TERMS + 1
+    column_terms = np.eye(n_columns)[cols]
+    design = np.hstack([group_terms, row_terms, column_terms])
+    penalty = np.hstack(
+        [
+            np.zeros((n_columns, design.shape[1] - n_columns)),
+            np.sqrt(ridge) * np.eye(n_columns),
+        ]
+    )
+    profiles = averaged[features].to_numpy(float)
+
+    def solve(values: np.ndarray) -> np.ndarray:
+        stacked = np.vstack([values, np.zeros((n_columns, values.shape[1]))])
+        return np.linalg.lstsq(np.vstack([design, penalty]), stacked, rcond=None)[0]
+
+    beta = solve(profiles)
+    mad_to_sigma = 1.4826
+    resid = profiles - design @ beta
+    resid_center = np.median(resid, axis=0)
+    mad = mad_to_sigma * np.median(np.abs(resid - resid_center), axis=0) + 1e-9
+    winsorized = design @ beta + np.clip(
+        resid, resid_center - 3 * mad, resid_center + 3 * mad
+    )
+    beta = solve(winsorized)
+
+    row_effects = beta[len(groups) : len(groups) + pcu.N_ROW_TERMS - 1]  # rows C to G
+    column_effects = beta[len(groups) + pcu.N_ROW_TERMS - 1 :]  # columns 2 to 11
+    coef = np.vstack(
+        [
+            np.zeros((1, len(features))),  # row B, the reference
+            row_effects,
+            column_effects[1:] - column_effects[0],  # columns 3 to 11 relative to column 2
+        ]
+    )
+    center = (pcu.design_matrix(rows, cols) @ coef).mean(axis=0)
+    return {"coef": coef, "center": center, "features": features}
+
+
+def with_plate_amplitudes(fit: dict, amplitudes: pd.DataFrame) -> dict:
+    """Attach the amplitude of every plate to a tilt map.
+
+    The amplitudes are keyed by the plate number, which is the platemap number of the
+    plate in ``discover_validation_profiles``, so the result works with
+    ``position_correction_utils.save_fit``, ``position_correction_utils.correct_cells`` and
+    ``position_correction_effect_utils.correct_well_medians``.
+
+    Parameters
+    ----------
+    fit : dict
+        Tilt map with the keys ``coef``, ``center`` and ``features``.
+    amplitudes : pd.DataFrame
+        Output of ``shrunk_plate_amplitudes``, with the columns ``plate_number`` and
+        ``shrunk_amplitude``.
+
+    Returns
+    -------
+    dict
+        Copy of ``fit`` with the key ``amplitudes`` (plate number mapped to its amplitude).
+    """
+    return {
+        **fit,
+        "amplitudes": {
+            int(number): float(value)
+            for number, value in zip(
+                amplitudes["plate_number"], amplitudes["shrunk_amplitude"], strict=True
+            )
+        },
+    }
+
+
+def shrunk_plate_amplitudes(
+    well_medians: pd.DataFrame,
+    fit: dict,
+    min_cells: int = 50,
+    n_boot: int = 200,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Measure the amplitude of every plate and shrink it like the screen does.
+
+    The amplitude of a plate is how strongly the tilt shows in it (``plate_amplitudes``).
+    Like the amplitude of a platemap in the screen, it is noisy, so we shrink it toward the
+    average of the other plates (``position_correction_utils.shrink_amplitude``).
+
+    Parameters
+    ----------
+    well_medians : pd.DataFrame
+        Well medians of the validation plates.
+    fit : dict
+        Tilt map with the keys ``coef``, ``center`` and ``features``.
+    min_cells : int, optional
+        Minimum number of cells for a well to be used, by default 50.
+    n_boot : int, optional
+        Number of resamples of the standard error, by default 200.
+    seed : int, optional
+        Seed of the resampling, by default 0.
+
+    Returns
+    -------
+    pd.DataFrame
+        The output of ``plate_amplitudes`` with the column ``shrunk_amplitude`` added.
+    """
+    table = plate_amplitudes(well_medians, fit, min_cells, n_boot, seed)
+    raw = {
+        int(row.plate_number): (row.amplitude, row.standard_error)
+        for row in table.itertuples()
+    }
+    table["shrunk_amplitude"] = [
+        pcu.shrink_amplitude(raw, int(number)) for number in table["plate_number"]
+    ]
+    return table
+
+
+def plate_amplitudes(
+    well_medians: pd.DataFrame,
+    fit: dict,
+    min_cells: int = 50,
+    n_boot: int = 200,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Measure how strongly the tilt shows in each replicate plate.
+
+    The amplitude of a plate is the scale of the tilt that best matches its wells
+    (``position_correction_utils.amplitude``) after the mean of each group of wells (a
+    compound, or the healthy or the failing DMSO) is removed from the profiles and from the
+    tilt, so that what a group does is not counted as position.
+    Its standard error comes from resampling the wells of the plate.
+    The tilt was fit on all five plates, so the amplitudes are around 1, and a plate that
+    differs a lot would show that the position effect is not the same on every plate.
+
+    Parameters
+    ----------
+    well_medians : pd.DataFrame
+        Well medians of the validation plates.
+    fit : dict
+        Tilt map with the keys ``coef``, ``center`` and ``features``.
+    min_cells : int, optional
+        Minimum number of cells for a well to be used, by default 50.
+    n_boot : int, optional
+        Number of resamples of the standard error, by default 200.
+    seed : int, optional
+        Seed of the resampling, by default 0.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per plate with the columns ``plate``, ``plate_number`` (1 to 5, in the
+        order of the plate names), ``amplitude`` and ``standard_error``.
+    """
+    wells = well_medians[well_medians["n"] >= min_cells].reset_index(drop=True)
+    features = list(fit["features"])
+    rows, cols = pcu.well_index(wells["well"])
+    profiles = wells[features].to_numpy(float)
+    tilt_values = pcu.tilt(fit["coef"], fit["center"], rows, cols)
+    group = (wells["treatment"] + "|" + wells["cell_type"]).to_numpy()
+    rng = np.random.default_rng(seed)
+    records = []
+    for number, plate in enumerate(sorted(wells["plate"].unique()), start=1):
+        in_plate = (wells["plate"] == plate).to_numpy()
+        labels = group[in_plate]
+        centered_profiles = profiles[in_plate] - pd.DataFrame(profiles[in_plate]).groupby(labels).transform("mean").to_numpy()
+        centered_tilt = tilt_values[in_plate] - pd.DataFrame(tilt_values[in_plate]).groupby(labels).transform("mean").to_numpy()
+        n_wells = in_plate.sum()
+        boots = []
+        for _ in range(n_boot):
+            draw = rng.integers(0, n_wells, n_wells)
+            boots.append(pcu.amplitude(centered_profiles[draw], centered_tilt[draw]))
+        records.append(
+            {
+                "plate": plate,
+                "plate_number": number,
+                "amplitude": pcu.amplitude(centered_profiles, centered_tilt),
+                "standard_error": float(np.std(boots)),
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def parse_feature_family(feature: str) -> dict[str, str]:
+    """Split a CellProfiler feature name into compartment, measurement and channel.
+
+    This is ``position_correction_effect_utils.parse_feature_family`` for the channels of
+    the validation plates (``CHANNELS``, with ``Golgi`` where the screen has ``PM``).
+
+    Parameters
+    ----------
+    feature : str
+        Feature name such as ``"Cells_Texture_SumAverage_DNA_3_00_256"``.
+
+    Returns
+    -------
+    dict[str, str]
+        The keys ``compartment``, ``measurement`` and ``channel``; the channel is
+        ``"Multiple channels"`` for features that combine channels and ``"No channel"``
+        for features without a channel.
+    """
+    parts = feature.split("_")
+    channels = []
+    for part in parts[2:]:
+        if part in CHANNELS and part not in channels:
+            channels.append(part)
+    if not channels:
+        channel = pce.NO_CHANNEL
+    elif len(channels) > 1:
+        channel = pce.MULTI_CHANNEL
+    else:
+        channel = channels[0]
+    return {"compartment": parts[0], "measurement": parts[1], "channel": channel}
+
+
+def tilt_size_by_feature(fit: dict) -> pd.DataFrame:
+    """Measure the size of the tilt of every feature and label its family.
+
+    The size of a feature is the root mean square of its tilt over all 60 positions of the
+    plate, with an amplitude of 1, in the units of the normalized features (standard
+    deviations of a single cell).
+    This is ``position_correction_effect_utils.tilt_size_by_feature`` with the channels of
+    the validation plates.
+
+    Parameters
+    ----------
+    fit : dict
+        Tilt map with the keys ``coef``, ``center`` and ``features``.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per feature with the columns ``feature``, ``tilt_rms``, ``compartment``,
+        ``measurement`` and ``channel``.
+    """
+    rows, cols = np.meshgrid(
+        np.arange(pcu.N_ROW_TERMS), np.arange(pcu.N_COL_TERMS + 1), indexing="ij"
+    )
+    tilt = pcu.tilt(fit["coef"], fit["center"], rows.ravel(), cols.ravel())
+    sizes = pd.DataFrame(
+        {"feature": fit["features"], "tilt_rms": np.sqrt((tilt**2).mean(axis=0))}
+    )
+    families = pd.DataFrame([parse_feature_family(name) for name in sizes["feature"]])
+    return pd.concat([sizes, families], axis=1)
+
+
+def leave_one_plate_out_correction(
+    wells: pd.DataFrame, features: Sequence[str], min_cells: int = 50
+) -> np.ndarray:
+    """Correct every plate with a tilt that was fit on the other plates.
+
+    For each plate, the tilt is fit on the wells of the other plates (compounds and
+    controls, ``fit_compound_adjusted_tilt`` with ``include_controls``) and subtracted from
+    the wells of the plate, so the correction never saw the plate.
+
+    Parameters
+    ----------
+    wells : pd.DataFrame
+        Wells with at least ``min_cells`` cells, with the columns ``plate``, ``well``,
+        ``treatment``, ``cell_type``, ``n`` and the features.
+    features : Sequence[str]
+        Features to correct.
+    min_cells : int, optional
+        Minimum cells of a well, by default 50.
+
+    Returns
+    -------
+    np.ndarray
+        Corrected profiles with shape ``(len(wells), len(features))``, in the order of
+        ``wells``.
+    """
+    features = list(features)
+    rows, cols = pcu.well_index(wells["well"])
+    raw = wells[features].to_numpy(float)
+    corrected = raw.copy()
+    plate = wells["plate"].to_numpy()
+    for name in sorted(set(plate)):
+        test = plate == name
+        fit = fit_compound_adjusted_tilt(
+            wells[~test], features, min_cells, include_controls=True
+        )
+        corrected[test] = raw[test] - pcu.tilt(
+            fit["coef"], fit["center"], rows[test], cols[test]
+        )
+    return corrected
+
+
+def position_variance_parts(
+    values: np.ndarray, wells: pd.DataFrame
+) -> tuple[np.ndarray, np.ndarray]:
+    """Measure the variation within groups of wells that is position, per feature.
+
+    The biology of a group of wells (the healthy DMSO, or the failing DMSO) is removed by
+    looking only at how its own wells differ. A group sits at several positions, the same on
+    every replicate plate. The variation of the position means of a group (which repeats on
+    all plates) is position, plus any interaction of the group with its position. The
+    variation of the replicate plates around their position mean is noise.
+
+    A feature with no position effect still has some variation between positions by chance,
+    in proportion to the noise (the degrees of freedom of the positions over those of the
+    replicates), so the function subtracts that chance level. What remains is the position
+    variation (the ``excess``), and the total is the variation within the groups.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        Profiles of the compound wells with shape ``(len(wells), n_features)``.
+    wells : pd.DataFrame
+        The wells with the columns ``group`` (healthy or failing DMSO) and ``well``, in the order of
+        ``values``.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        The position variation above chance (the ``excess``) and the total variation within
+        the compounds, for every feature, in squared standardized units summed over the
+        wells. The share of the variation that is position is the ratio of the two.
+    """
+    compound = wells["group"].to_numpy()
+    position = (wells["group"] + "_" + wells["well"]).to_numpy()
+    frame = pd.DataFrame(values)
+    compound_mean = frame.groupby(compound).transform("mean").to_numpy()
+    position_mean = frame.groupby(position).transform("mean").to_numpy()
+    between = np.zeros(values.shape[1])
+    within = np.zeros(values.shape[1])
+    chance = np.zeros(values.shape[1])
+    for name in sorted(set(compound)):
+        in_compound = compound == name
+        n_positions = len(set(position[in_compound]))
+        n_wells = int(in_compound.sum())
+        noise = ((values[in_compound] - position_mean[in_compound]) ** 2).sum(axis=0)
+        between += (
+            (position_mean[in_compound] - compound_mean[in_compound]) ** 2
+        ).sum(axis=0)
+        within += noise
+        chance += noise * (n_positions - 1) / (n_wells - n_positions)
+    return between - chance, between + within
+
+
+def position_variance_share(values: np.ndarray, wells: pd.DataFrame) -> np.ndarray:
+    """Measure the share of the variation within compounds that is position, per feature.
+
+    See ``position_variance_parts``. A share of 0 means no more variation between positions
+    than chance.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        Profiles of the compound wells with shape ``(len(wells), n_features)``.
+    wells : pd.DataFrame
+        The wells with the columns ``group`` (healthy or failing DMSO) and ``well``, in the order of
+        ``values``.
+
+    Returns
+    -------
+    np.ndarray
+        The position share of every feature (missing for features without variation).
+    """
+    excess, total = position_variance_parts(values, wells)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return excess / total
+
+
+def held_out_position_variance(
+    well_medians: pd.DataFrame, features: Sequence[str], min_cells: int = 50
+) -> pd.DataFrame:
+    """Measure the position variation of every feature before and after the correction.
+
+    The measurement uses the DMSO wells, which sit at the same positions on all five
+    plates, so the replicate plates give the noise (see ``position_variance_parts``): the
+    healthy DMSO and the failing DMSO are two groups.
+
+    Parameters
+    ----------
+    well_medians : pd.DataFrame
+        Median profile of every well (see ``load_or_build_well_medians``).
+    features : Sequence[str]
+        Features to measure.
+    min_cells : int, optional
+        Minimum cells of a well, by default 50.
+
+    Returns
+    -------
+    pd.DataFrame
+        A table with one row per feature and the position share (``position_variance_share``) of
+        the uncorrected wells (``raw``), of the wells corrected by a tilt that was fit on all
+        plates (``in_sample``, which a fit on its own data always favors), and of the wells
+        corrected by a tilt that was fit on the other four plates (``held_out``). The
+        columns ending in ``_excess`` are the position variation above chance in absolute
+        units (``position_variance_parts``).
+    """
+    features = list(features)
+    wells = well_medians[well_medians["n"] >= min_cells].reset_index(drop=True)
+    wells["group"] = wells["treatment"] + "|" + wells["cell_type"]
+    rows, cols = pcu.well_index(wells["well"])
+    raw = wells[features].to_numpy(float)
+    fit = fit_compound_adjusted_tilt(wells, features, min_cells, include_controls=True)
+    in_sample = raw - pcu.tilt(fit["coef"], fit["center"], rows, cols)
+    held_out = leave_one_plate_out_correction(wells, features, min_cells)
+    is_control = (wells["treatment"] == "DMSO").to_numpy()
+    controls = wells[is_control].reset_index(drop=True)
+    table = {"feature": features}
+    for name, values in (("raw", raw), ("in_sample", in_sample), ("held_out", held_out)):
+        excess, total = position_variance_parts(values[is_control], controls)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            table[name] = excess / total
+        table[f"{name}_excess"] = excess
+    return pd.DataFrame(table)
+
+
+def well_score_table(
+    medians: pd.DataFrame, before: np.ndarray, after: np.ndarray
+) -> pd.DataFrame:
+    """Combine the principal component scores of wells before and after correction.
+
+    This is ``position_correction_effect_utils.well_score_table`` with the plate number
+    (1 to 5, in the order of the plate names) in the column ``plate_number``, because the
+    validation plates share one platemap.
+
+    Parameters
+    ----------
+    medians : pd.DataFrame
+        One row per well, with the columns ``plate``, ``platemap``, ``well``, ``treatment``
+        and ``cell_type``.
+    before, after : np.ndarray
+        Wells by components scores before and after the correction, in the same principal
+        components and in the row order of ``medians``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Two rows per well (``version`` is ``"Before correction"`` or ``"After
+        correction"``) with the columns of
+        ``position_correction_effect_utils.well_score_table``, and ``plate_number`` in
+        place of ``platemap_number``.
+    """
+    table = pce.well_score_table(medians, before, after)
+    numbers = {p: i + 1 for i, p in enumerate(sorted(medians["plate"].unique()))}
+    table.insert(2, "plate_number", table["plate"].map(numbers))
+    return table.drop(columns="platemap_number")
+
+
+def _row_probabilities(
+    train_x: np.ndarray,
+    train_rows: np.ndarray,
+    test_x: np.ndarray,
+    n_components: int,
+    seed: int,
+) -> np.ndarray:
+    """Train a row classifier and predict the row probabilities of new wells.
+
+    The model is the one of the screen's held-out validation
+    (``3a.position_correction/1.validate_position_correction.ipynb``): standardize the
+    profiles, reduce them to ``n_components`` principal components, and fit a
+    class-balanced multinomial logistic regression of the plate row.
+
+    Parameters
+    ----------
+    train_x : np.ndarray
+        Training wells by features.
+    train_rows : np.ndarray
+        Row index (0 to 5, rows B to G) of each training well.
+    test_x : np.ndarray
+        Wells to predict, with the same features as ``train_x``.
+    n_components : int
+        Number of principal components.
+    seed : int
+        Random seed of the PCA.
+
+    Returns
+    -------
+    np.ndarray
+        Probabilities with shape ``(len(test_x), N_ROWS)``; a row that is absent from
+        ``train_rows`` gets probability 0.
+    """
+    model = make_pipeline(
+        StandardScaler(),
+        PCA(n_components=n_components, random_state=seed),
+        LogisticRegression(max_iter=2000, class_weight="balanced"),
+    )
+    model.fit(train_x, train_rows)
+    probabilities = np.zeros((len(test_x), N_ROWS))
+    probabilities[:, model.classes_] = model.predict_proba(test_x)
+    return probabilities
+
+
+def leave_one_plate_out_row_prediction(
+    wells: pd.DataFrame,
+    features: Sequence[str],
+    make_offsets: Callable[
+        [pd.DataFrame], Callable[[np.ndarray, np.ndarray], np.ndarray]
+    ]
+    | None = None,
+    shuffle_seed: int | None = None,
+    n_components: int = 50,
+    seed: int = 0,
+) -> np.ndarray:
+    """Predict the plate row of wells of a plate that the correction and the classifier never saw.
+
+    The question is the one of the screen: after a correction, can a classifier still tell
+    which plate row a well came from?
+    The screen holds out a platemap. The validation plates share the positions of the DMSO
+    wells and differ in their compounds, so we hold out one plate at a time. For every plate,
+    the function
+
+    1. fits the correction on the other plates only (``make_offsets``), or leaves the
+       profiles as they are when ``make_offsets`` is None;
+    2. corrects all wells with it;
+    3. trains the row classifier on the wells of the other plates;
+    4. predicts the row probabilities of the wells of the held-out plate.
+
+    Parameters
+    ----------
+    wells : pd.DataFrame
+        Wells with the columns ``plate``, ``well`` and the features.
+    features : Sequence[str]
+        Features of the classifier.
+    make_offsets : Callable | None, optional
+        Function that takes the training wells (a data frame like ``wells``) and returns a
+        function of the zero-based row and column indices of wells that gives the offsets
+        to subtract, with one row per well and one column per feature.
+        By default, there is no correction.
+    shuffle_seed : int | None, optional
+        When set, the row labels of the training wells are shuffled with this seed.
+        This gives the chance-level floor, as in the screen.
+    n_components : int, optional
+        Number of principal components of the classifier, by default 50.
+    seed : int, optional
+        Random seed of the PCA, by default 0.
+
+    Returns
+    -------
+    np.ndarray
+        Row probabilities with shape ``(len(wells), N_ROWS)``, in the order of ``wells``.
+    """
+    features = list(features)
+    wells = wells.reset_index(drop=True)
+    rows, cols = pcu.well_index(wells["well"])
+    profiles = wells[features].to_numpy(float)
+    plate = wells["plate"].to_numpy()
+    rng = np.random.default_rng(shuffle_seed)
+    probabilities = np.zeros((len(wells), N_ROWS))
+    for name in sorted(set(plate)):
+        test = plate == name
+        train = ~test
+        corrected = profiles
+        if make_offsets is not None:
+            corrected = profiles - make_offsets(wells[train])(rows, cols)
+        train_rows = rows[train]
+        if shuffle_seed is not None:
+            train_rows = rng.permutation(train_rows)
+        probabilities[test] = _row_probabilities(
+            corrected[train], train_rows, corrected[test], n_components, seed
+        )
+    return probabilities
+
+
+def row_prediction_scores(rows: np.ndarray, probabilities: np.ndarray) -> dict:
+    """Score row predictions as in the screen.
+
+    Parameters
+    ----------
+    rows : np.ndarray
+        True row index (0 to 5) of each well.
+    probabilities : np.ndarray
+        Row probabilities with shape ``(len(rows), N_ROWS)``.
+
+    Returns
+    -------
+    dict
+        ``macro_auc``, the one-vs-rest AUC averaged over the rows that the wells are in
+        (the probabilities of the other rows are left out and the rest are rescaled to add
+        up to 1), and ``row_b_auc``, the AUC of the row B probability for row B wells against
+        all other wells (missing when no well is in row B, or all are).
+        A value of 0.5 is chance level.
+    """
+    present = sorted(np.unique(rows))
+    present_probabilities = probabilities[:, present]
+    present_probabilities = present_probabilities / present_probabilities.sum(
+        axis=1, keepdims=True
+    )
+    is_row_b = rows == 0
+    return {
+        "macro_auc": float(
+            roc_auc_score(
+                rows,
+                present_probabilities,
+                multi_class="ovr",
+                average="macro",
+                labels=present,
+            )
+        ),
+        "row_b_auc": float(roc_auc_score(is_row_b, probabilities[:, 0]))
+        if 0 < is_row_b.sum() < len(rows)
+        else float("nan"),
+    }
+
+
+def control_contrast(
+    well_medians: pd.DataFrame,
+    features: Sequence[str],
+    offsets: np.ndarray | None = None,
+) -> pd.DataFrame:
+    """Measure the healthy minus failing DMSO contrast of every plate.
+
+    The healthy controls sit in row B and the failing controls in row E, and the
+    correction shifts both, so the correction changes this contrast (see the assumptions in
+    ``3a.position_correction/0.fit_position_correction.ipynb``).
+
+    Parameters
+    ----------
+    well_medians : pd.DataFrame
+        Well medians of the validation plates, with the columns ``plate``, ``treatment``,
+        ``cell_type`` and the features.
+    features : Sequence[str]
+        Features of the contrast.
+    offsets : np.ndarray | None, optional
+        Offsets to subtract from the wells, with one row per row of ``well_medians`` and
+        one column per feature.
+        By default, there is no correction.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per plate with the column ``norm``, the Euclidean length of the difference
+        between the mean healthy DMSO and the mean failing DMSO profile.
+    """
+    features = list(features)
+    profiles = well_medians[features].to_numpy(float)
+    if offsets is not None:
+        profiles = profiles - offsets
+    is_dmso = (well_medians["treatment"] == "DMSO").to_numpy()
+    healthy = is_dmso & (well_medians["cell_type"] == HEALTHY_CELL_TYPE).to_numpy()
+    failing = is_dmso & (well_medians["cell_type"] == FAILING_CELL_TYPE).to_numpy()
+    records = []
+    for plate in well_medians["plate"].unique():
+        in_plate = (well_medians["plate"] == plate).to_numpy()
+        difference = profiles[in_plate & healthy].mean(axis=0) - profiles[
+            in_plate & failing
+        ].mean(axis=0)
+        records.append({"plate": plate, "norm": float(np.linalg.norm(difference))})
+    return pd.DataFrame(records)
