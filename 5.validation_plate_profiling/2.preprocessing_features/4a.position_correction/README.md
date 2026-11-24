@@ -154,12 +154,12 @@ The table gives the leave-one-plate-out result: the AUC of a classifier that pre
 
 **5. The position variation of the features falls, but does not vanish.**
 Of the variation within the DMSO groups, the share that is position (with the chance level subtracted) has a median of 0.26 per feature before the correction, and 55% of the features are above 0.2 (Figure 8).
-After a tilt fit on all plates it is 0.10 (36% above 0.2), which a fit on its own data always favors.
+After a tilt fit on all plates, applied with the amplitude of each plate as step 4b does, it is 0.08 (33% above 0.2), which a fit on its own data always favors.
 After a tilt that never saw the plate (held-out) it is 0.05 (28% above 0.2).
 For a median feature with a clear position effect (share above 0.2, 1,335 features), the held-out correction removes 85% of the position variation (quartiles 67% to 92%), and 6% of these features get worse.
-Overall 14% of the position variation is left after the in-sample correction and 8% after the held-out one.
+Overall 12% of the position variation is left after the in-sample correction and 8% after the held-out one (the held-out correction uses the tilt as it is, because the amplitude of a plate that the fit never saw is not known).
 The held-out figure being lower than the in-sample one is not credible as a real gain: the measure subtracts a noise level estimated from the differences between plates, and the five held-out corrections differ a little between plates, which adds to that noise.
-We take the two figures to be about equal, and the remaining position variation to be 8% to 14%.
+We take the two figures to be about equal, and the remaining position variation to be 8% to 12%.
 Of the 1,335 features with a clear position effect, 113 (8%) keep at least 80% of it after the held-out correction: 48 DNA, 29 without a channel, 13 ER, 12 Golgi, 5 multi-channel, 5 Mito, and 1 Actin feature.
 
 ![Figure 8](./figures/quantify/position_variance_by_feature.png)
@@ -193,6 +193,7 @@ What remains is mostly column structure that is confounded with the groups (the 
 **8. The correction does not change the healthy versus failing contrast.**
 The length of the healthy minus failing DMSO difference is 12.8 to 14.5 on every plate before the correction and the same after it (the share that survives is 1.00), and the tilt itself predicts no difference between the positions of the healthy and the failing wells (it differs by 0; the correction changes the difference of a plate by at most 4e-09; Figure 12).
 This is by design: the rows are balanced between the two cell types, and the fit does not split the column-block offsets between the group and the column effects.
+The balance has to survive the filter on the number of cells: if a healthy well were dropped from one row without a matching failing well, the healthy mean would shift by the offset of that row and the ratio would move away from 1 even for a correct fit. Here no DMSO well is dropped (15 wells of each kind in every row, `1.fit_position_correction.ipynb`).
 The difference that survives is the one left after the fitted tilt is subtracted; it is not necessarily all biology, because the fit leaves the offsets of the three blocks of columns in the group effects.
 In the screen (43 of its 44 plates; one plate has no healthy DMSO well with enough cells) the median over plates is 0.84, but it hides large differences between platemaps: the correction makes the difference 1.5 to 2.1 times longer on platemaps 1 to 4 (single plates up to 3.1 times), and keeps 0.40 to 0.85 of it on platemaps 5 to 11 (Figure 13; see [`6.compare_position_effects_in_validation_to_screen.ipynb`](./6.compare_position_effects_in_validation_to_screen.ipynb)).
 

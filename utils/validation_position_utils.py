@@ -749,7 +749,10 @@ def position_variance_share(values: np.ndarray, wells: pd.DataFrame) -> np.ndarr
 
 
 def held_out_position_variance(
-    well_medians: pd.DataFrame, features: Sequence[str], min_cells: int = 50
+    well_medians: pd.DataFrame,
+    features: Sequence[str],
+    min_cells: int = 50,
+    amplitudes: dict[int, float] | None = None,
 ) -> pd.DataFrame:
     """Measure the position variation of every feature before and after the correction.
 
@@ -765,6 +768,11 @@ def held_out_position_variance(
         Features to measure.
     min_cells : int, optional
         Minimum cells of a well, by default 50.
+    amplitudes : dict[int, float] | None, optional
+        Amplitude of each plate (plate number mapped to the shrunk amplitude of the fit).
+        The in-sample correction multiplies the tilt of a plate by its amplitude, as step 4b
+        does. The held-out correction cannot know the amplitude of a plate that it never saw,
+        and uses the tilt as it is (amplitude 1). By default, every amplitude is 1.
 
     Returns
     -------
@@ -782,7 +790,12 @@ def held_out_position_variance(
     rows, cols = pcu.well_index(wells["well"])
     raw = wells[features].to_numpy(float)
     fit = fit_compound_adjusted_tilt(wells, features, min_cells, include_controls=True)
-    in_sample = raw - pcu.tilt(fit["coef"], fit["center"], rows, cols)
+    scale = (
+        wells["platemap"].map(amplitudes).to_numpy(float)[:, None]
+        if amplitudes is not None
+        else 1.0
+    )
+    in_sample = raw - scale * pcu.tilt(fit["coef"], fit["center"], rows, cols)
     held_out = leave_one_plate_out_correction(wells, features, min_cells)
     is_control = (wells["treatment"] == "DMSO").to_numpy()
     controls = wells[is_control].reset_index(drop=True)

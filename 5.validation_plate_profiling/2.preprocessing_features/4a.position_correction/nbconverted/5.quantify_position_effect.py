@@ -75,8 +75,9 @@ wells = well_medians[well_medians["n"] >= min_cells].reset_index(drop=True)
 rows, cols0 = pcu.well_index(wells["well"])
 wells["row"], wells["column"] = rows, wells["well"].str[1:].astype(int)
 raw = wells[features].to_numpy(float)
-# the shift that the tilt predicts at every well (the correction subtracts it)
-tilt_at_wells = pcu.tilt(coef, center, rows, cols0)
+# the shift that the tilt predicts at every well, with the amplitude of the plate as step 4b applies it
+amplitude = wells["platemap"].map(fit["amplitudes"]).to_numpy(float)[:, None]
+tilt_at_wells = amplitude * pcu.tilt(coef, center, rows, cols0)
 corrected = raw - tilt_at_wells
 is_dmso = (wells["treatment"] == "DMSO").to_numpy()
 is_healthy = (is_dmso & (wells["cell_type"] == HEALTHY)).to_numpy()
@@ -92,7 +93,9 @@ print("Wells:", len(wells), "| Features:", len(features), "| Plates:", wells["pl
 # In[4]:
 
 
-shares = vpu.held_out_position_variance(well_medians, features, min_cells)
+shares = vpu.held_out_position_variance(
+    well_medians, features, min_cells, amplitudes=fit["amplitudes"]
+)
 shares = pd.concat(
     [shares, pd.DataFrame([vpu.parse_feature_family(name) for name in shares["feature"]])],
     axis=1,

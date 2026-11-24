@@ -175,6 +175,7 @@ plt.show()
 
 # The tilt is estimated from the compound wells and both kinds of DMSO wells, and it is subtracted from every well.
 # The healthy and the failing DMSO wells are in blocks of columns that cover all six rows evenly, so the correction should leave the healthy minus failing contrast as it is (the ratio of its length after and before is near 1).
+# This holds only while the two kinds of DMSO stay balanced across the rows: the wells with too few cells are dropped before the offsets and the contrast are computed, and if the filter removed a healthy well from one row without a matching failing well, the healthy mean would shift by the offset of that row and the ratio would move away from 1 even for a correct fit. The table below shows the number of DMSO wells of each kind in every row after the filter.
 
 # In[7]:
 
@@ -193,6 +194,11 @@ kind = np.where(
 )
 offset_size = pd.Series(np.sqrt((offsets**2).mean(axis=1)), name="mean offset (RMS)")
 print(offset_size.groupby(kind).agg(["mean", "size"]).round(3))
+
+# the contrast is left alone only if the filter keeps the same number of wells of each kind in every row
+dmso_by_row = pd.crosstab(kind[is_dmso.to_numpy()], wells.loc[is_dmso, "row"].map(dict(enumerate(pcu.ROWS))))
+print("DMSO wells of each kind by row after the cell filter:")
+print(dmso_by_row.to_string())
 
 contrast = vpu.control_contrast(wells, features).merge(
     vpu.control_contrast(wells, features, offsets),
