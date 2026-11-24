@@ -176,38 +176,18 @@ print("Plates of each compound:", well_medians.loc[well_medians["kind"] == "comp
 # In[5]:
 
 
-def variance_table(wells, profiles, label, factors=("row", "col", "plate", "treatment")):
-    """Fraction of each principal component that the `factors` of `wells` explain."""
-    pca = pce.fit_pca(profiles, n_components, random_state)
-    scores = pca.transform(profiles)
-    table = pd.DataFrame(
-        {
-            "analysis": label,
-            "component": [f"PC{i + 1}" for i in range(n_components)],
-            "variance_explained": pca.explained_variance_ratio_,
-        }
-    )
-    for factor in factors:
-        if factor in wells and wells[factor].nunique() > 1:
-            table[f"{factor}_explains"] = [
-                pce.variance_explained_by(scores[:, i], wells[factor].to_numpy())
-                for i in range(n_components)
-            ]
-    return table, pca, scores
-
-
 wells = well_medians[well_medians["n"] >= min_cells].reset_index(drop=True)
-all_table, all_pca, all_scores = variance_table(
-    wells, wells[features].to_numpy(float), "all wells"
+all_table, all_pca, all_scores = pce.pc_variance_table(
+    wells, wells[features].to_numpy(float), "all wells", n_components, random_state
 )
 
 failing_wells = wells[wells["kind"] == "failing DMSO"].reset_index(drop=True)
-failing_table, _, _ = variance_table(
-    failing_wells, failing_wells[features].to_numpy(float), "failing DMSO wells", factors=("row", "col", "plate")
+failing_table, _, _ = pce.pc_variance_table(
+    failing_wells, failing_wells[features].to_numpy(float), "failing DMSO wells", n_components, random_state, factors=("row", "col", "plate")
 )
 healthy_wells = wells[wells["kind"] == "healthy DMSO"].reset_index(drop=True)
-healthy_table, _, _ = variance_table(
-    healthy_wells, healthy_wells[features].to_numpy(float), "healthy DMSO wells", factors=("row", "col", "plate")
+healthy_table, _, _ = pce.pc_variance_table(
+    healthy_wells, healthy_wells[features].to_numpy(float), "healthy DMSO wells", n_components, random_state, factors=("row", "col", "plate")
 )
 
 # average the replicate plates of every DMSO well, then remove the mean of its cell type
@@ -218,10 +198,12 @@ within_profiles = averaged[features].to_numpy(float) - (
     averaged.groupby("kind")[features].transform("mean").to_numpy(float)
 )
 # the cell type and the plate cannot explain anything here: their effects are removed or averaged
-within_table, _, _ = variance_table(
+within_table, _, _ = pce.pc_variance_table(
     averaged,
     within_profiles,
     "DMSO wells without the cell-type effect",
+    n_components,
+    random_state,
     factors=("row", "col"),
 )
 
@@ -290,39 +272,11 @@ print(
 # In[8]:
 
 
-def r_squared(values, predictors):
-    """R squared of a linear model of `values` with an intercept and the `predictors` columns."""
-    design = np.column_stack([np.ones(len(values)), predictors])
-    coefficients = np.linalg.lstsq(design, values, rcond=None)[0]
-    residual = values - design @ coefficients
-    return 1 - (residual**2).sum() / ((values - values.mean()) ** 2).sum()
-
-
-def explained_by_position_and_cells(rows, log_cells, scores, label):
-    """R squared of each component for plate row, log cells per well, and both."""
-    present = np.unique(rows)
-    row_terms = (rows[:, None] == present[None, 1:]).astype(float)
-    records = []
-    for i in range(scores.shape[1]):
-        records.append(
-            {
-                "analysis": label,
-                "component": f"PC{i + 1}",
-                "row": r_squared(scores[:, i], row_terms),
-                "log_cells": r_squared(scores[:, i], log_cells[:, None]),
-                "row_and_log_cells": r_squared(
-                    scores[:, i], np.column_stack([row_terms, log_cells])
-                ),
-            }
-        )
-    return pd.DataFrame(records)
-
-
 density = []
 for label, subset in (("failing DMSO wells", failing_wells), ("healthy DMSO wells", healthy_wells)):
     subset_pca = pce.fit_pca(subset[features].to_numpy(float), 3, random_state)
     density.append(
-        explained_by_position_and_cells(
+        pce.explained_by_position_and_cells(
             subset["row"].to_numpy(),
             np.log(subset["n"].to_numpy()),
             subset_pca.transform(subset[features].to_numpy(float)),
@@ -342,7 +296,7 @@ within_cells = averaged_cells["log_cells"].to_numpy() - averaged_cells.groupby("
 ].transform("mean").to_numpy()
 within_pca = pce.fit_pca(within_profiles, 3, random_state)
 density.append(
-    explained_by_position_and_cells(
+    pce.explained_by_position_and_cells(
         averaged["row"].to_numpy(),
         within_cells,
         within_pca.transform(within_profiles),

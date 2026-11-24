@@ -224,34 +224,22 @@ plt.show()
 dmso = wells[is_dmso]
 
 
-def position_pattern(table):
-    """Mean profile of every position (the plates averaged), centered over the positions."""
-    means = table.groupby("well")[features].mean()
-    return means.index, means.to_numpy(float) - means.to_numpy(float).mean(axis=0)
-
-
-def cosine_and_slope(observed, predicted):
-    """Cosine and slope between two patterns (positions by features)."""
-    inner = float((observed * predicted).sum())
-    return inner / np.sqrt((observed**2).sum() * (predicted**2).sum()), inner / float((predicted**2).sum())
-
-
 plate_order = sorted(wells["plate"].unique())
 records = []
 for source, target in ((FAILING, HEALTHY), (HEALTHY, FAILING)):
     source_wells = dmso[dmso["cell_type"] == source]
     tilt_fit = vpu.fit_compound_adjusted_tilt(source_wells, features, min_cells, include_controls=True)
     target_wells = dmso[dmso["cell_type"] == target]
-    positions, observed = position_pattern(target_wells)
+    positions, observed = vpu.mean_position_pattern(target_wells, features)
     t_rows, t_cols = pcu.well_index(pd.Series(positions))
     predicted = pcu.tilt(tilt_fit["coef"], tilt_fit["center"], t_rows, t_cols)
     predicted = predicted - predicted.mean(axis=0)
-    cosine, slope = cosine_and_slope(observed, predicted)
+    cosine, slope = vpu.cosine_and_slope(observed, predicted)
     half_a = target_wells[target_wells["plate"].isin(plate_order[0::2])]
     half_b = target_wells[target_wells["plate"].isin(plate_order[1::2])]
-    _, pattern_a = position_pattern(half_a)
-    _, pattern_b = position_pattern(half_b)
-    ceiling, _ = cosine_and_slope(pattern_a, pattern_b)
+    _, pattern_a = vpu.mean_position_pattern(half_a, features)
+    _, pattern_b = vpu.mean_position_pattern(half_b, features)
+    ceiling, _ = vpu.cosine_and_slope(pattern_a, pattern_b)
     records.append({"fit_on": source, "predicts": target, "cosine": cosine, "slope": slope, "ceiling_cosine": ceiling, "n_positions": len(positions)})
 cross = pd.DataFrame(records)
 print(cross.round(2).to_string(index=False))
@@ -274,7 +262,7 @@ ax.legend(fontsize=9, loc="upper center", ncol=2)
 ax = axes[1]
 source_wells = dmso[dmso["cell_type"] == FAILING]
 tilt_fit = vpu.fit_compound_adjusted_tilt(source_wells, features, min_cells, include_controls=True)
-positions, observed = position_pattern(dmso[dmso["cell_type"] == HEALTHY])
+positions, observed = vpu.mean_position_pattern(dmso[dmso["cell_type"] == HEALTHY], features)
 t_rows, t_cols = pcu.well_index(pd.Series(positions))
 predicted = pcu.tilt(tilt_fit["coef"], tilt_fit["center"], t_rows, t_cols)
 predicted = predicted - predicted.mean(axis=0)
@@ -306,19 +294,11 @@ plt.show()
 held_out_profiles = vpu.leave_one_plate_out_correction(wells, features, min_cells)
 
 
-def distance_from_class_mean(values):
-    """Distance of each DMSO well from the mean profile of its cell type."""
-    result = np.full(len(wells), np.nan)
-    for mask in (is_healthy, is_failing):
-        result[mask] = np.linalg.norm(values[mask] - values[mask].mean(axis=0), axis=1)
-    return result
-
-
 deviation = wells[["plate", "well", "treatment", "cell_type"]].copy()
 deviation["row"] = deviation["well"].str[0]
 deviation["column"] = deviation["well"].str[1:].astype(int)
-deviation["raw"] = distance_from_class_mean(raw)
-deviation["held_out"] = distance_from_class_mean(held_out_profiles)
+deviation["raw"] = vpu.distance_from_class_mean(raw, is_healthy, is_failing)
+deviation["held_out"] = vpu.distance_from_class_mean(held_out_profiles, is_healthy, is_failing)
 deviation = deviation[is_dmso]
 
 by_row = deviation.groupby("row")[["raw", "held_out"]].mean()
@@ -335,13 +315,6 @@ rows_label = list(pcu.ROWS)
 column_numbers = list(range(2, 12))
 
 
-def layout(plate, column_name):
-    grid = np.full((len(rows_label), len(column_numbers)), np.nan)
-    for _, well in deviation[deviation["plate"] == plate].iterrows():
-        grid[rows_label.index(well["row"]), well["column"] - 2] = well[column_name]
-    return grid
-
-
 vmax = max(deviation["raw"].max(), deviation["held_out"].max())
 fig, axes = plt.subplots(3, len(plates), figsize=(3.4 * len(plates), 8.6), squeeze=False)
 cmap = plt.get_cmap("viridis").copy()
@@ -349,7 +322,8 @@ cmap.set_bad("#dddddd")
 diverging = plt.get_cmap("RdBu_r").copy()
 diverging.set_bad("#dddddd")
 for j, plate in enumerate(plates):
-    raw_grid, held_grid = layout(plate, "raw"), layout(plate, "held_out")
+    raw_grid = vpu.plate_layout_grid(deviation, plate, "raw", rows_label, column_numbers)
+    held_grid = vpu.plate_layout_grid(deviation, plate, "held_out", rows_label, column_numbers)
     panels = [
         (raw_grid, cmap, 0, vmax, "Uncorrected"),
         (held_grid, cmap, 0, vmax, "Corrected (held-out)"),
@@ -387,23 +361,12 @@ plt.show()
 # In[12]:
 
 
-n_row_terms = pcu.N_ROW_TERMS
-
-
-def position_terms(fit):
-    """Row effects against row B and column effects against column 2, one vector over features per term."""
-    coefficients = fit["coef"]
-    rows = coefficients[1:n_row_terms] - coefficients[0]
-    cols = coefficients[n_row_terms:]
-    return np.vstack([rows, cols])
-
-
 term_names = [f"Row {row} vs B" for row in "CDEFG"] + [f"Column {c} vs 2" for c in range(3, 12)]
-full_terms = position_terms(vpu.fit_compound_adjusted_tilt(wells, features, min_cells, include_controls=True))
+full_terms = vpu.tilt_position_terms(vpu.fit_compound_adjusted_tilt(wells, features, min_cells, include_controls=True))
 plates = sorted(wells["plate"].unique())
 leave_one_out = np.stack(
     [
-        position_terms(
+        vpu.tilt_position_terms(
             vpu.fit_compound_adjusted_tilt(wells[wells["plate"] != plate], features, min_cells, include_controls=True)
         )
         for plate in plates

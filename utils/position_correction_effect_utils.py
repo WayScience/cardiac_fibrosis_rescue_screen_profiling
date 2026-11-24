@@ -214,3 +214,150 @@ def well_score_table(
         ]
     ]
     return pd.concat(tables, ignore_index=True)
+
+
+def r_squared(values: np.ndarray, predictors: np.ndarray) -> float:
+    """R squared of a linear model of ``values`` with an intercept and the ``predictors`` columns."""
+    design = np.column_stack([np.ones(len(values)), predictors])
+    coefficients = np.linalg.lstsq(design, values, rcond=None)[0]
+    residual = values - design @ coefficients
+    return 1 - (residual**2).sum() / ((values - values.mean()) ** 2).sum()
+
+
+def adjusted_r_squared(scores: np.ndarray, design: np.ndarray) -> np.ndarray:
+    """Adjusted R squared of every column of ``scores`` on ``design`` (which has its own intercept)."""
+    n_wells, n_terms = design.shape
+    coefficients = np.linalg.lstsq(design, scores, rcond=None)[0]
+    residual = ((scores - design @ coefficients) ** 2).sum(axis=0)
+    total = ((scores - scores.mean(axis=0)) ** 2).sum(axis=0)
+    return 1 - (residual / total) * (n_wells - 1) / (n_wells - n_terms)
+
+
+def pc_variance_table(
+    wells: pd.DataFrame,
+    profiles: np.ndarray,
+    label: str,
+    n_components: int = 10,
+    random_state: int = 0,
+    factors: Sequence[str] = ("row", "col", "plate", "treatment"),
+) -> tuple[pd.DataFrame, PCA, np.ndarray]:
+    """Fraction of each principal component that the ``factors`` of ``wells`` explain.
+
+    Returns the table (one row per component), the fitted PCA, and the scores of the wells.
+    A factor with a single level is skipped.
+    """
+    pca = fit_pca(profiles, n_components, random_state)
+    scores = pca.transform(profiles)
+    table = pd.DataFrame(
+        {
+            "analysis": label,
+            "component": [f"PC{i + 1}" for i in range(n_components)],
+            "variance_explained": pca.explained_variance_ratio_,
+        }
+    )
+    for factor in factors:
+        if factor in wells and wells[factor].nunique() > 1:
+            table[f"{factor}_explains"] = [
+                variance_explained_by(scores[:, i], wells[factor].to_numpy())
+                for i in range(n_components)
+            ]
+    return table, pca, scores
+
+
+def explained_by_position_and_cells(
+    rows: np.ndarray, log_cells: np.ndarray, scores: np.ndarray, label: str
+) -> pd.DataFrame:
+    """R squared of each component for plate row, log cells per well, and both."""
+    present = np.unique(rows)
+    row_terms = (rows[:, None] == present[None, 1:]).astype(float)
+    records = []
+    for i in range(scores.shape[1]):
+        records.append(
+            {
+                "analysis": label,
+                "component": f"PC{i + 1}",
+                "row": r_squared(scores[:, i], row_terms),
+                "log_cells": r_squared(scores[:, i], log_cells[:, None]),
+                "row_and_log_cells": r_squared(
+                    scores[:, i], np.column_stack([row_terms, log_cells])
+                ),
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def partition_variance(
+    medians: pd.DataFrame,
+    fit: dict,
+    healthy_label: str,
+    n_components: int = 20,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Split the variance of the principal components into position and heart status.
+
+    The components are fit on the uncorrected wells and the corrected wells are projected
+    on them. The position part of a component is the adjusted R squared of its scores on
+    the row and column of the wells, and the status part is the squared correlation with
+    the healthy against failing label.
+    """
+    features = list(fit["features"])
+    raw = medians[features].to_numpy(float)
+    corrected = correct_well_medians(medians, fit)[features].to_numpy(float)
+    pca = fit_pca(raw, n_components, seed)
+    total_variance = pca.explained_variance_[0] / pca.explained_variance_ratio_[0]
+    scores = {"before": pca.transform(raw), "after": pca.transform(corrected)}
+    rows, cols = pcu.well_index(medians["well"])
+    design = pcu.design_matrix(rows, cols)
+    status = (medians["cell_type"] == healthy_label).to_numpy(float)
+    records = []
+    for stage, values in scores.items():
+        variance = values.var(axis=0, ddof=1)
+        position = np.clip(adjusted_r_squared(values, design), 0, None)
+        status_r2 = np.array(
+            [np.corrcoef(values[:, k], status)[0, 1] ** 2 for k in range(n_components)]
+        )
+        for k in range(n_components):
+            records.append(
+                {
+                    "stage": stage,
+                    "component": f"PC{k + 1}",
+                    "variance_pct_of_total": 100 * variance[k] / total_variance,
+                    "position_pct_of_total": 100 * variance[k] * position[k] / total_variance,
+                    "status_pct_of_total": 100 * variance[k] * status_r2[k] / total_variance,
+                    "position_r2": position[k],
+                    "status_r2": status_r2[k],
+                }
+            )
+    return pd.DataFrame(records)
+
+
+def healthy_failing_difference(
+    medians: pd.DataFrame,
+    fit: dict,
+    healthy_label: str,
+    failing_label: str = "failing",
+) -> pd.DataFrame:
+    """Length of the healthy minus failing DMSO difference of every plate, before and after the correction."""
+    features = list(fit["features"])
+    raw = medians[features].to_numpy(float)
+    corrected = correct_well_medians(medians, fit)[features].to_numpy(float)
+    is_dmso = (medians["treatment"] == "DMSO").to_numpy()
+    healthy = is_dmso & (medians["cell_type"] == healthy_label).to_numpy()
+    failing = is_dmso & (medians["cell_type"] == failing_label).to_numpy()
+    records = []
+    for plate in sorted(medians["plate"].unique()):
+        in_plate = (medians["plate"] == plate).to_numpy()
+        h, f = in_plate & healthy, in_plate & failing
+        raw_difference = raw[h].mean(0) - raw[f].mean(0)
+        corrected_difference = corrected[h].mean(0) - corrected[f].mean(0)
+        records.append(
+            {
+                "plate": plate,
+                "platemap": int(medians.loc[in_plate, "platemap"].iloc[0]),
+                "raw": np.linalg.norm(raw_difference),
+                "corrected": np.linalg.norm(corrected_difference),
+            }
+        )
+    table = pd.DataFrame(records)
+    table["share_that_survives"] = table["corrected"] / table["raw"]
+    return table

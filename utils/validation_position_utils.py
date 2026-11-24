@@ -844,3 +844,101 @@ def control_contrast(
         ].mean(axis=0)
         records.append({"plate": plate, "norm": float(np.linalg.norm(difference))})
     return pd.DataFrame(records)
+
+
+def training_tilt_offsets(
+    training_wells: pd.DataFrame, features: Sequence[str], min_cells: int = 50
+) -> Callable[[np.ndarray, np.ndarray], np.ndarray]:
+    """Fit the tilt on the training plates only and return its offsets of well positions.
+
+    The result is a function of the row and column indices of wells, as the
+    ``make_offsets`` argument of ``leave_one_plate_out_row_prediction`` expects.
+    """
+    fit = fit_compound_adjusted_tilt(
+        training_wells, features, min_cells, include_controls=True
+    )
+    return lambda rows, columns: pcu.tilt(fit["coef"], fit["center"], rows, columns)
+
+
+def held_out_row_prediction_scores(
+    rows: np.ndarray,
+    probabilities: dict[str, np.ndarray],
+    shuffled: Sequence[np.ndarray],
+    subset: np.ndarray,
+) -> tuple[dict, dict, pd.DataFrame]:
+    """Pooled held-out scores of the raw, corrected, and shuffled classifiers on a subset of wells.
+
+    ``probabilities`` has the keys ``"raw"`` and ``"corrected"``, and ``shuffled`` is a list
+    of the probabilities of classifiers that were trained on shuffled rows.
+    """
+    raw = row_prediction_scores(rows[subset], probabilities["raw"][subset])
+    corrected = row_prediction_scores(rows[subset], probabilities["corrected"][subset])
+    floor = pd.DataFrame([row_prediction_scores(rows[subset], p[subset]) for p in shuffled])
+    return raw, corrected, floor
+
+
+def tilt_recovery(
+    estimated: dict, true_tilt: np.ndarray, rows: np.ndarray, columns: np.ndarray
+) -> tuple[float, float]:
+    """Median cosine and relative size of an estimated tilt, compared with the true tilt (both centered)."""
+    tilt_estimate = pcu.tilt(estimated["coef"], estimated["center"], rows, columns)
+    tilt_estimate = tilt_estimate - tilt_estimate.mean(axis=0)
+    centered_truth = true_tilt - true_tilt.mean(axis=0)
+    cosines = np.sum(tilt_estimate * centered_truth, axis=1) / (
+        np.linalg.norm(tilt_estimate, axis=1) * np.linalg.norm(centered_truth, axis=1)
+    )
+    return float(np.median(cosines)), float(pcu.amplitude(tilt_estimate, centered_truth))
+
+
+def mean_position_pattern(
+    wells: pd.DataFrame, features: Sequence[str]
+) -> tuple[pd.Index, np.ndarray]:
+    """Mean profile of every position (the plates averaged), centered over the positions."""
+    means = wells.groupby("well")[list(features)].mean()
+    return means.index, means.to_numpy(float) - means.to_numpy(float).mean(axis=0)
+
+
+def cosine_and_slope(observed: np.ndarray, predicted: np.ndarray) -> tuple[float, float]:
+    """Cosine and slope between two patterns (positions by features)."""
+    inner = float((observed * predicted).sum())
+    return (
+        inner / np.sqrt((observed**2).sum() * (predicted**2).sum()),
+        inner / float((predicted**2).sum()),
+    )
+
+
+def distance_from_class_mean(
+    values: np.ndarray, is_healthy: np.ndarray, is_failing: np.ndarray
+) -> np.ndarray:
+    """Distance of each DMSO well from the mean profile of its cell type (NaN for the other wells)."""
+    result = np.full(len(values), np.nan)
+    for mask in (is_healthy, is_failing):
+        result[mask] = np.linalg.norm(values[mask] - values[mask].mean(axis=0), axis=1)
+    return result
+
+
+def tilt_position_terms(fit: dict) -> np.ndarray:
+    """Row effects against row B and column effects against column 2: one vector over features per term."""
+    coefficients = fit["coef"]
+    rows = coefficients[1 : pcu.N_ROW_TERMS] - coefficients[0]
+    cols = coefficients[pcu.N_ROW_TERMS :]
+    return np.vstack([rows, cols])
+
+
+def plate_layout_grid(
+    table: pd.DataFrame,
+    plate: str,
+    value_column: str,
+    row_labels: Sequence[str],
+    column_numbers: Sequence[int],
+) -> np.ndarray:
+    """Values of one plate on the plate layout (rows by columns), NaN where the table has no well.
+
+    ``table`` has the columns ``plate``, ``row`` (a label of ``row_labels``), ``column``
+    (a number of ``column_numbers``) and ``value_column``.
+    """
+    grid = np.full((len(row_labels), len(column_numbers)), np.nan)
+    first_column = column_numbers[0]
+    for _, well in table[table["plate"] == plate].iterrows():
+        grid[list(row_labels).index(well["row"]), well["column"] - first_column] = well[value_column]
+    return grid

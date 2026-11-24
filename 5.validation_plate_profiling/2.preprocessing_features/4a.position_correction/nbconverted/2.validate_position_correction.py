@@ -86,15 +86,9 @@ print(pd.Series(rows).map(dict(enumerate(pcu.ROWS))).value_counts().sort_index()
 # In[4]:
 
 
-def make_offsets(training_wells):
-    """Fit the tilt on the training plates only and return its offsets of well positions."""
-    fit = vpu.fit_compound_adjusted_tilt(training_wells, features, min_cells, include_controls=True)
-    return lambda r, c: pcu.tilt(fit["coef"], fit["center"], r, c)
-
-
 probabilities = {
     "raw": vpu.leave_one_plate_out_row_prediction(wells, features),
-    "corrected": vpu.leave_one_plate_out_row_prediction(wells, features, make_offsets=make_offsets),
+    "corrected": vpu.leave_one_plate_out_row_prediction(wells, features, make_offsets=lambda training_wells: vpu.training_tilt_offsets(training_wells, features, min_cells)),
 }
 shuffled = [vpu.leave_one_plate_out_row_prediction(wells, features, shuffle_seed=s) for s in range(n_shuffles)]
 
@@ -109,17 +103,9 @@ shuffled = [vpu.leave_one_plate_out_row_prediction(wells, features, shuffle_seed
 # In[5]:
 
 
-def scores_for(subset):
-    """Pooled held-out scores of the raw, corrected, and shuffled classifiers on a subset of wells."""
-    raw = vpu.row_prediction_scores(rows[subset], probabilities["raw"][subset])
-    corrected = vpu.row_prediction_scores(rows[subset], probabilities["corrected"][subset])
-    floor = pd.DataFrame([vpu.row_prediction_scores(rows[subset], p[subset]) for p in shuffled])
-    return raw, corrected, floor
-
-
 records = []
 for label, subset in [("all wells", np.ones(len(wells), bool)), ("DMSO wells", is_dmso)]:
-    raw, corrected, floor = scores_for(subset)
+    raw, corrected, floor = vpu.held_out_row_prediction_scores(rows, probabilities, shuffled, subset)
     for column, name in [("macro_auc", "macro AUC over the rows"), ("row_b_auc", "row B against the rest")]:
         records.append(
             {
@@ -225,22 +211,11 @@ coef, center = pcu.fit_tilt_map(averaged[sim_features].to_numpy(float), avg_rows
 without_group_effects = {"coef": coef, "center": center}
 
 
-def recovery(estimated):
-    """Median cosine and relative size of the estimated tilt, compared with the true tilt (both centered)."""
-    tilt_estimate = pcu.tilt(estimated["coef"], estimated["center"], sim_rows, sim_cols)
-    tilt_estimate = tilt_estimate - tilt_estimate.mean(axis=0)
-    centered_truth = true_tilt - true_tilt.mean(axis=0)
-    cosines = np.sum(tilt_estimate * centered_truth, axis=1) / (
-        np.linalg.norm(tilt_estimate, axis=1) * np.linalg.norm(centered_truth, axis=1)
-    )
-    return float(np.median(cosines)), float(pcu.amplitude(tilt_estimate, centered_truth))
-
-
 for label, estimated in [
     ("with group effects (this fit)", with_group_effects),
     ("without group effects", without_group_effects),
 ]:
-    cosine, scale = recovery(estimated)
+    cosine, scale = vpu.tilt_recovery(estimated, true_tilt, sim_rows, sim_cols)
     print(f"{label}: median cosine to the true tilt {cosine:.2f}, estimated size / true size {scale:.2f}")
 
 

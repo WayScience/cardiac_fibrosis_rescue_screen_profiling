@@ -100,49 +100,11 @@ for name, data in datasets.items():
 # In[3]:
 
 
-def adjusted_r_squared(scores, design):
-    """Adjusted R squared of every column of ``scores`` on ``design`` (which has its own intercept)."""
-    n_wells, n_terms = design.shape
-    coefficients = np.linalg.lstsq(design, scores, rcond=None)[0]
-    residual = ((scores - design @ coefficients) ** 2).sum(axis=0)
-    total = ((scores - scores.mean(axis=0)) ** 2).sum(axis=0)
-    return 1 - (residual / total) * (n_wells - 1) / (n_wells - n_terms)
-
-
-def partition_variance(medians, fit, healthy_label):
-    """Split the variance of the principal components into position and heart status."""
-    features = list(fit["features"])
-    raw = medians[features].to_numpy(float)
-    corrected = pce.correct_well_medians(medians, fit)[features].to_numpy(float)
-    pca = pce.fit_pca(raw, n_components, seed)
-    total_variance = pca.explained_variance_[0] / pca.explained_variance_ratio_[0]
-    scores = {"before": pca.transform(raw), "after": pca.transform(corrected)}
-    rows, cols = pcu.well_index(medians["well"])
-    design = pcu.design_matrix(rows, cols)
-    status = (medians["cell_type"] == healthy_label).to_numpy(float)
-    records = []
-    for stage, values in scores.items():
-        variance = values.var(axis=0, ddof=1)
-        position = np.clip(adjusted_r_squared(values, design), 0, None)
-        status_r2 = np.array([np.corrcoef(values[:, k], status)[0, 1] ** 2 for k in range(n_components)])
-        for k in range(n_components):
-            records.append(
-                {
-                    "stage": stage,
-                    "component": f"PC{k + 1}",
-                    "variance_pct_of_total": 100 * variance[k] / total_variance,
-                    "position_pct_of_total": 100 * variance[k] * position[k] / total_variance,
-                    "status_pct_of_total": 100 * variance[k] * status_r2[k] / total_variance,
-                    "position_r2": position[k],
-                    "status_r2": status_r2[k],
-                }
-            )
-    return pd.DataFrame(records)
-
-
 # the principal components of the screen are fit on all of its wells, as in its own analysis; the validation plates have 300 wells with at least 50 cells
 partitions = {
-    name: partition_variance(data["all_wells"] if name == "Screen" else data["medians"], data["fit"], data["healthy"])
+    name: pce.partition_variance(
+        data["all_wells"] if name == "Screen" else data["medians"], data["fit"], data["healthy"], n_components, seed
+    )
     for name, data in datasets.items()
 }
 for name, table in partitions.items():
@@ -189,34 +151,10 @@ plt.show()
 # In[5]:
 
 
-def healthy_failing_difference(medians, fit, healthy_label):
-    """Length of the healthy minus failing DMSO difference of every plate, before and after the correction."""
-    features = list(fit["features"])
-    raw = medians[features].to_numpy(float)
-    corrected = pce.correct_well_medians(medians, fit)[features].to_numpy(float)
-    is_dmso = (medians["treatment"] == "DMSO").to_numpy()
-    healthy = is_dmso & (medians["cell_type"] == healthy_label).to_numpy()
-    failing = is_dmso & (medians["cell_type"] == "failing").to_numpy()
-    records = []
-    for plate in sorted(medians["plate"].unique()):
-        in_plate = (medians["plate"] == plate).to_numpy()
-        h, f = in_plate & healthy, in_plate & failing
-        raw_difference = raw[h].mean(0) - raw[f].mean(0)
-        corrected_difference = corrected[h].mean(0) - corrected[f].mean(0)
-        records.append(
-            {
-                "plate": plate,
-                "platemap": int(medians.loc[in_plate, "platemap"].iloc[0]),
-                "raw": np.linalg.norm(raw_difference),
-                "corrected": np.linalg.norm(corrected_difference),
-            }
-        )
-    table = pd.DataFrame(records)
-    table["share_that_survives"] = table["corrected"] / table["raw"]
-    return table
-
-
-survival = {name: healthy_failing_difference(data["medians"], data["fit"], data["healthy"]) for name, data in datasets.items()}
+survival = {
+    name: pce.healthy_failing_difference(data["medians"], data["fit"], data["healthy"])
+    for name, data in datasets.items()
+}
 print(pd.DataFrame({name: table[["raw", "corrected", "share_that_survives"]].median() for name, table in survival.items()}).round(2).to_string())
 
 
