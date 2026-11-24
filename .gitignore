@@ -43,6 +43,7 @@ runinfo*
 # Ignore the cached well-level summary used to fit the position correction
 4.image_based_profiling/3a.position_correction/well_medians.parquet
 5.validation_plate_profiling/2.preprocessing_features/4a.position_correction/well_medians.parquet
+5.validation_plate_profiling/2.preprocessing_features/4a.position_correction/well_medians_dropped_features.json
 
 # Ignore vscode specific files
 .vscode*

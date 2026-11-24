@@ -22,6 +22,7 @@ format (``coef``, ``center``, ``features`` and ``amplitudes``), so
 ``position_correction_utils.save_fit``, ``load_fit`` and ``correct_cells`` work with it.
 """
 
+import json
 import pathlib
 from collections.abc import Callable, Iterable, Sequence
 
@@ -126,6 +127,49 @@ def discover_validation_profiles(
     return pd.DataFrame(records).sort_values("platemap", ignore_index=True)
 
 
+def dropped_features_path(cache_path: str | pathlib.Path) -> pathlib.Path:
+    """Path of the file that records the features that building the well cache dropped."""
+    cache_path = pathlib.Path(cache_path)
+    return cache_path.with_name(cache_path.stem + "_dropped_features.json")
+
+
+def check_feature_selection_is_plate_independent(cache_path: str | pathlib.Path) -> None:
+    """Check that the held-out plate does not decide which features the tests use.
+
+    Building the well cache drops every feature with a missing value in any well of any
+    plate. A test that holds out a plate keeps a feature that is missing on that plate
+    only, so a feature that is missing on exactly one plate would make the feature set of
+    that fold differ from the set of the cache. The check reads the record that the build
+    wrote (``dropped_features_path``).
+
+    Parameters
+    ----------
+    cache_path : str | pathlib.Path
+        Parquet file of the well medians (see ``load_or_build_well_medians``).
+
+    Raises
+    ------
+    FileNotFoundError
+        If the cache has no record of its dropped features (it was built by an older
+        version): delete the cache and build it again.
+    ValueError
+        If a feature is missing on exactly one plate. The message names the features.
+    """
+    record = dropped_features_path(cache_path)
+    if not record.is_file():
+        raise FileNotFoundError(
+            f"{record} is missing, so we cannot tell which features the cache dropped. "
+            f"Delete {cache_path} and build it again."
+        )
+    dropped = json.loads(record.read_text())
+    one_plate = {feature: plates for feature, plates in dropped.items() if len(plates) == 1}
+    if one_plate:
+        raise ValueError(
+            f"{len(one_plate)} features are missing on exactly one plate, so the feature set "
+            f"of a test that holds that plate out would differ from the cache: {one_plate}"
+        )
+
+
 def load_or_build_well_medians(
     cache_path: str | pathlib.Path,
     profile_dir: str | pathlib.Path,
@@ -175,8 +219,12 @@ def load_or_build_well_medians(
     )
     if plate_table.empty:
         raise FileNotFoundError(f"No *_sc_normalized.parquet files in {profile_dir}")
-    well_medians, features = pcu.build_well_medians(plate_table, n_jobs=n_jobs)
+    well_medians, features, dropped = pcu.build_well_medians(
+        plate_table, n_jobs=n_jobs, return_dropped=True
+    )
     well_medians.to_parquet(cache_path, index=False)
+    # record what the build dropped, so that the held-out tests can check the features
+    dropped_features_path(cache_path).write_text(json.dumps(dropped, indent=1))
     return well_medians, features
 
 
@@ -1091,6 +1139,53 @@ def tilt_recovery(
         np.linalg.norm(tilt_estimate, axis=1) * np.linalg.norm(centered_truth, axis=1)
     )
     return float(np.median(cosines)), float(pcu.amplitude(tilt_estimate, centered_truth))
+
+
+def group_effect_recovery(
+    wells: pd.DataFrame,
+    features: Sequence[str],
+    estimated: dict,
+    true_effects: dict[str, np.ndarray],
+) -> tuple[float, float]:
+    """Compare the group effects after the correction with the true group effects of a simulation.
+
+    The tilt that ``estimated`` holds is subtracted from the simulated wells, the corrected
+    profiles are averaged within every group (a compound, or the DMSO of one cell type) and
+    centered over the groups, and the result is compared with the true group effects
+    (centered the same way).
+
+    Parameters
+    ----------
+    wells : pd.DataFrame
+        Simulated wells with the columns ``treatment``, ``cell_type``, ``well`` and the features.
+    features : Sequence[str]
+        Names of the feature columns.
+    estimated : dict
+        Tilt map with the keys ``coef`` and ``center``.
+    true_effects : dict[str, np.ndarray]
+        True effect of every group over the features, keyed ``"<treatment>|<cell_type>"``.
+
+    Returns
+    -------
+    tuple[float, float]
+        The median over the groups of the cosine between the corrected and the true group
+        effect, and the scale of the corrected effects along the true ones (1 if the
+        correction keeps the group effects at their size).
+    """
+    rows, cols = pcu.well_index(wells["well"])
+    corrected = wells[list(features)].to_numpy(float) - pcu.tilt(
+        estimated["coef"], estimated["center"], rows, cols
+    )
+    keys = (wells["treatment"] + "|" + wells["cell_type"]).to_numpy()
+    groups = sorted(true_effects)
+    corrected_means = np.vstack([corrected[keys == group].mean(axis=0) for group in groups])
+    corrected_means -= corrected_means.mean(axis=0)
+    truth = np.vstack([true_effects[group] for group in groups])
+    truth -= truth.mean(axis=0)
+    cosines = np.sum(corrected_means * truth, axis=1) / (
+        np.linalg.norm(corrected_means, axis=1) * np.linalg.norm(truth, axis=1)
+    )
+    return float(np.median(cosines)), float((corrected_means * truth).sum() / (truth * truth).sum())
 
 
 def mean_row_pattern(

@@ -145,8 +145,8 @@ The table gives the leave-one-plate-out result: the AUC of a classifier that pre
   The DMSO positions are the same on every plate, so a classifier can learn the pattern of a well from the other plates, which a row plus column tilt does not contain; we have not tested whether this is the reason.
   In the screen, the same test took the pooled AUC from 0.76 to 0.52.
 - On each plate separately, the AUC over the rows goes from 0.88 to 0.69 (plate 1), 0.88 to 0.79 (plate 2), 0.89 to 0.80 (plate 3), 0.84 to 0.85 (plate 4), and 0.81 to 0.81 (plate 5).
-- In a simulation on the real layout, the fit with one effect for each group recovers the tilt that the layout can identify (the true column effects are centered within the three blocks of columns; median cosine 1.00), and the screen's way of fitting, without group effects, reaches 0.77.
-- The held-out test selects the features on all plates. No feature has a missing value on any plate in these data, so the held-out plate does not influence the selection; `2.validate_position_correction.ipynb` checks this.
+- In a simulation on the real layout, the fit with one effect for each group recovers the tilt that the layout can identify (the true column effects are centered within the three blocks of columns; median cosine 1.00) and keeps the group effects: after the correction the mean of each group has a median cosine of 0.99 with its true effect, at scale 1.00. The screen's way of fitting, without group effects, reaches 0.77 for the tilt and shrinks the group effects (scale 0.87).
+- The held-out test selects the features on all plates. Building the well cache drops every feature with a missing value in any well and records what it dropped; no feature was dropped in these data, so the held-out plate does not influence the selection. `2.validate_position_correction.ipynb` reads that record and stops if a feature is missing on exactly one plate.
 
 ![Figure 7](./figures/validation/row_prediction_validation.png)
 
@@ -220,7 +220,7 @@ So the row effect moves the two cell types in nearly the same way.
 **10. Some terms of the tilt are poorly determined.**
 Leaving out each plate in turn, the five terms of the rows C to G against row B are 5 to 7 times larger than their uncertainty (Figure 15).
 None of the nine column terms is more than 2 times its uncertainty (1.0 to 2.0), so the column effects are not determined by these plates, in line with the fact that they are confounded with the groups and do not carry over between plates.
-Only two of the column terms are identified by the layout: `Column 4 vs 2` and `Column 10 vs 2` compare columns of the same block (the failing DMSO). The other seven cross two blocks, and adding a constant to the healthy columns and subtracting it from the healthy DMSO group effect leaves every fitted profile unchanged but changes them, so they depend on the ridge convention (hatched in Figure 15); a small jackknife uncertainty would only show that they are stable under that convention.
+Only two of the column terms are identified by the layout: `Column 4 vs 2` and `Column 10 vs 2` compare columns of the same block (the failing DMSO). The other seven cross two blocks: adding a constant to the columns of a block and subtracting it from the group effect of that block leaves every fitted profile unchanged, but it changes the contrasts of those columns against column 2 (shifting the healthy block changes `Column 3`, `Column 9`, and `Column 11 vs 2`, and shifting the compound block changes `Column 5` to `Column 8 vs 2`). So they depend on the ridge convention (hatched in Figure 15); a small jackknife uncertainty would only show that they are stable under that convention.
 The rows are well determined and the columns are not.
 
 ![Figure 15](./figures/quantify/tilt_terms_and_uncertainty.png)
@@ -245,7 +245,7 @@ So compounds were not placed independently of position on some platemaps, which 
 - The groups sit in blocks of columns (failing DMSO in columns 2, 4, and 10, healthy DMSO in 3, 9, and 11, compounds in 5 to 8), so a column effect is confounded with the cell type and the compounds, and only the differences between columns inside a block are determined.
   The column terms of the tilt are therefore not reliable, and the row terms carry the correction.
 - The held-out test is held out by plate, so it tells how the correction works for a new plate on this layout, not for a new layout.
-- We use wells with at least 50 cells, and we drop features with a missing value in any well (no feature of these data has one on any plate, so the features are the same for every plate).
+- We use wells with at least 50 cells, and we drop features with a missing value in any well (no feature of these data has one on any plate, so the features are the same for every plate; the cache keeps a record of what it dropped).
 - The principal-component figures fit the components on the uncorrected wells and project the corrected wells into them, as in the screen.
 
 ## Contents

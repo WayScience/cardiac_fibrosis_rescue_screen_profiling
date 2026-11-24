@@ -72,10 +72,10 @@ min_cells = 50  # minimum cells for a well to be used
 well_medians, features = vpu.load_or_build_well_medians(
     well_medians_cache, ".", platemap_dir="../../metadata/platemaps"
 )
-# The features are chosen on all plates, so the held-out plate must not decide which ones stay. This holds
-# when no feature has a missing value on any plate (the loader drops a feature with a missing value in any well).
-if well_medians[features].isna().any().any():
-    raise ValueError("A feature has a missing value: select the features on the training plates only")
+# The features are chosen on all plates, so the held-out plate must not decide which ones stay. Building the
+# cache drops every feature with a missing value in any well; this checks the record of what it dropped (an
+# error if a feature is missing on exactly one plate, because a fold that holds that plate out would keep it).
+vpu.check_feature_selection_is_plate_independent(well_medians_cache)
 wells = well_medians[well_medians["n"] >= min_cells].reset_index(drop=True)
 rows, cols = pcu.well_index(wells["well"])
 is_dmso = (wells["treatment"] == "DMSO").to_numpy()
@@ -182,6 +182,7 @@ plt.show()
 # We simulate the five plates on their real layouts (the real healthy DMSO, failing DMSO, and compound positions) with a known tilt (a strong row B effect), a random effect for each group of wells (the healthy DMSO, the failing DMSO, and each compound), and measurement noise.
 # The fit should recover the tilt without removing the group effects.
 # The true column effects are centered within the three blocks of columns, because the layout cannot tell a block offset from the effect of the group in it (the tilt that the fit can recover).
+# We also check the claim that the group effects are not removed: after the correction, the mean of every group is compared with its true effect (median cosine and scale over the groups).
 # We report the median cosine between the estimated and the true tilt and the scale of the estimate along the true tilt (the projection of the estimate on the true tilt, which is 1 for a tilt of the right size).
 # We compare the fit with one effect per group (`vpu.fit_compound_adjusted_tilt` with the controls) with a fit that has no group effects (a row plus column fit of all wells, as in the screen's `pcu.fit_tilt_map`), which counts the difference between the groups as position when the groups sit in different rows.
 
@@ -235,6 +236,9 @@ for label, estimated in [
 ]:
     cosine, scale = vpu.tilt_recovery(estimated, true_tilt, sim_rows, sim_cols)
     print(f"{label}: median cosine to the true tilt {cosine:.2f}, scale of the estimate along the true tilt {scale:.2f}")
+    # the group effects must survive the correction: compare the corrected group means with the true effects
+    group_cosine, group_scale = vpu.group_effect_recovery(simulated_wells, sim_features, estimated, group_effect)
+    print(f"   group effects after the correction: median cosine to the true group effects {group_cosine:.2f}, scale {group_scale:.2f}")
 
 
 # ## What this does and does not show

@@ -97,7 +97,7 @@ for name, data in datasets.items():
 # A component that follows only the healthy columns therefore scores 1 on both the red and the blue bar, and the blue bar is not variance that position does not explain.
 # The orange bar (row alone) is not confounded with heart status on the validation plates.
 # The red bar after the correction is the position variation that the fit leaves in the wells that it was fit on, which a fit on its own data always favors.
-# The position variation that the correction leaves in wells of a plate that it never saw is in `5.quantify_position_effect.ipynb`.
+# The position variation that the correction leaves in wells of a plate that it never saw is in [5.quantify_position_effect.ipynb](5.quantify_position_effect.ipynb).
 
 # In[3]:
 
