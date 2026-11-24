@@ -46,7 +46,7 @@ This layout differs from the screen in three ways that matter for the correction
 | [`3.effect_on_feature_space.ipynb`](./3.effect_on_feature_space.ipynb) | Computes the size of the tilt by feature family and the principal components of the wells before and after the correction | `2.effect_on_feature_space` |
 | [`4.plot_effect_on_feature_space.ipynb`](./4.plot_effect_on_feature_space.ipynb) (R) | Draws the effect figures from those tables | `3.plot_effect_on_feature_space` |
 | [`5.quantify_position_effect.ipynb`](./5.quantify_position_effect.ipynb) | Measures the position effect directly: the position variation of every feature within the DMSO groups, position against biology, whether the tilt carries over between cell types, and the DMSO wells on the layout of each plate, before and after the correction | none |
-| [`6.compare_to_screen.ipynb`](./6.compare_to_screen.ipynb) | Puts the validation plates next to the screen: the variance of the principal components split into position and heart status, the survival of the healthy against failing difference, and the placement of compounds on the screen platemaps | none |
+| [`6.compare_position_effects_in_validation_to_screen.ipynb`](./6.compare_position_effects_in_validation_to_screen.ipynb) | Puts the validation plates next to the screen: the variance of the principal components split into position and heart status, the survival of the healthy against failing difference, and the placement of compounds on the screen platemaps | none |
 
 Run them in order; every notebook has a script version in [`nbconverted/`](./nbconverted/).
 The first one that needs the single-cell profiles reads the five `<plate>_sc_normalized.parquet` files (about 1.4 GB, on bandicoot at `~/mnt/bandicoot/CFReT_screening_data/validation_profiles/single_cell_profiles/`, or in the folder that `VALIDATION_PROFILE_DIR` names) and caches the median profile of every well in `well_medians.parquet`, which git ignores.
@@ -86,7 +86,7 @@ The figures are the five figures of the screen, for the validation plates.
 | [`plate_layout_well_deviation.png`](./figures/quantify/plate_layout_well_deviation.png) | For each plate, the distance of every DMSO well from the mean profile of its cell type, before and after the held-out correction |
 | [`tilt_terms_and_uncertainty.png`](./figures/quantify/tilt_terms_and_uncertainty.png) | The size of each of the 14 row and column terms of the tilt, with its uncertainty from leaving out each plate |
 
-[`figures/compare_to_screen/`](./figures/compare_to_screen/) has the figures of `6.compare_to_screen.ipynb` (see Comparison with the screen below):
+[`figures/compare_to_screen/`](./figures/compare_to_screen/) has the figures of `6.compare_position_effects_in_validation_to_screen.ipynb` (see Comparison with the screen below):
 
 | Figure | What it shows |
 |---|---|
@@ -140,7 +140,7 @@ The table gives the leave-one-plate-out result: the AUC of a classifier that pre
 **5. The correction does not change the healthy versus failing contrast.**
 The length of the healthy minus failing DMSO difference is 12.8 to 14.5 on every plate before the correction and the same after it (the share that survives is 1.00), and the tilt itself predicts no difference between the positions of the healthy and the failing wells.
 This is by design: the rows are balanced between the two cell types, and the fit does not split the column-block offsets between the group and the column effects.
-In the screen the median over plates is 0.84, but it hides large differences between platemaps: the correction makes the difference 1.5 to 2.1 times longer on platemaps 1 to 4, and keeps 0.40 to 0.85 of it on platemaps 5 to 11 (see [`6.compare_to_screen.ipynb`](./6.compare_to_screen.ipynb)).
+In the screen the median over plates is 0.84, but it hides large differences between platemaps: the correction makes the difference 1.5 to 2.1 times longer on platemaps 1 to 4, and keeps 0.40 to 0.85 of it on platemaps 5 to 11 (see [`6.compare_position_effects_in_validation_to_screen.ipynb`](./6.compare_position_effects_in_validation_to_screen.ipynb)).
 
 **6. The tilt of one cell type predicts the position pattern of the other well.**
 Both cell types are at 18 positions, so we fitted the tilt on the failing DMSO only and compared its prediction for the 18 healthy positions with what the healthy wells show (and the reverse).
@@ -180,7 +180,7 @@ The same pattern holds on all five plates ([`plate_layout_well_deviation.png`](.
 
 ## Comparison with the screen
 
-[`6.compare_to_screen.ipynb`](./6.compare_to_screen.ipynb) runs the same measurements on the screen and on the validation plates.
+[`6.compare_position_effects_in_validation_to_screen.ipynb`](./6.compare_position_effects_in_validation_to_screen.ipynb) runs the same measurements on the screen and on the validation plates.
 
 **What the tilt is.** The correction subtracts from every feature a position effect, the sum of one effect for the row and one for the column of a well.
 The fit of a feature has one effect for each group (15 compounds and 2 kinds of DMSO), five row effects (rows C to G against row B), and ten column effects with a ridge penalty (reported against column 2): 32 parameters, of which three combinations are not determined by the layout.
@@ -225,16 +225,16 @@ So compounds were not placed independently of position on some platemaps, which 
 
 ```text
 4a.position_correction/
-├── 0.diagnose_position_effect.ipynb      Diagnose the uncorrected plates
-├── 1.fit_position_correction.ipynb       Fit the tilt
-├── 2.validate_position_correction.ipynb  Test it on held-out plates
-├── 3.effect_on_feature_space.ipynb       Tables of the effect on the features and the wells
-├── 4.plot_effect_on_feature_space.ipynb  Figures of the effect (R)
-├── 5.quantify_position_effect.ipynb      Measure the position effect directly
-├── 6.compare_to_screen.ipynb             Compare the validation plates with the screen
-├── nbconverted/                          Script version of each notebook
-├── position_correction_fit.npz           The tilt map and amplitude (committed; step 4b reads it)
-├── results/                              Tables that later notebooks read
-├── figures/                              Figures (diagnostics/, fit/, validation/, effect/, quantify/, compare_to_screen/)
-└── well_medians.parquet                  Median profile of every well (git ignores this cache)
+├── 0.diagnose_position_effect.ipynb                          Diagnose the uncorrected plates
+├── 1.fit_position_correction.ipynb                           Fit the tilt
+├── 2.validate_position_correction.ipynb                      Test it on held-out plates
+├── 3.effect_on_feature_space.ipynb                           Tables of the effect on the features and the wells
+├── 4.plot_effect_on_feature_space.ipynb                      Figures of the effect (R)
+├── 5.quantify_position_effect.ipynb                          Measure the position effect directly
+├── 6.compare_position_effects_in_validation_to_screen.ipynb  Compare the validation plates with the screen
+├── nbconverted/                                              Script version of each notebook
+├── position_correction_fit.npz                               The tilt map and amplitude (committed; step 4b reads it)
+├── results/                                                  Tables that later notebooks read
+├── figures/                                                  Figures (diagnostics/, fit/, validation/, effect/, quantify/, compare_to_screen/)
+└── well_medians.parquet                                      Median profile of every well (git ignores this cache)
 ```
