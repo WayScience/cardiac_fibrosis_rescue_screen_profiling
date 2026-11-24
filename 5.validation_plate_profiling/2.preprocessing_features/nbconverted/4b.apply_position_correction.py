@@ -33,7 +33,6 @@ import sys
 import pandas as pd
 from pycytominer import feature_select
 from pycytominer.cyto_utils import output
-from pycytominer.cyto_utils import output
 
 sys.path.append("../../utils")
 import position_correction_utils as pcu
@@ -88,12 +87,7 @@ output_suffixes = ["sc_position_corrected", "sc_position_corrected_feature_selec
 # In[3]:
 
 
-fit = pcu.load_fit(fit_path)
-if not set(range(1, 6)) <= set(fit["amplitudes"]):
-    raise ValueError(
-        "No amplitude for every plate in the position correction fit. "
-        "Rerun 4a.position_correction/1.fit_position_correction.ipynb."
-    )
+fit = vpu.load_validation_fit(fit_path)
 print("Amplitude of each plate:", fit["amplitudes"])
 print("Features in fit:", len(fit["features"]))
 
@@ -103,8 +97,13 @@ print("Features in fit:", len(fit["features"]))
 # In[4]:
 
 
+# the amplitude of a plate is found by the name of the plate, and a plate that the fit does not
+# cover stops the notebook here, before any output is written
 plate_info_dictionary = {
-    row.plate: {"normalized_path": row.path, "plate_number": row.platemap}
+    row.plate: {
+        "normalized_path": row.path,
+        "plate_number": vpu.plate_number_in_fit(fit, row.plate),
+    }
     for row in vpu.discover_validation_profiles(input_dir).itertuples()
 }
 

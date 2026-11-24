@@ -221,16 +221,28 @@ def r_squared(values: np.ndarray, predictors: np.ndarray) -> float:
     design = np.column_stack([np.ones(len(values)), predictors])
     coefficients = np.linalg.lstsq(design, values, rcond=None)[0]
     residual = values - design @ coefficients
-    return 1 - (residual**2).sum() / ((values - values.mean()) ** 2).sum()
+    total = ((values - values.mean()) ** 2).sum()
+    if total == 0:
+        return 0.0  # a score without variation has nothing to explain (as variance_explained_by)
+    return 1 - (residual**2).sum() / total
 
 
 def adjusted_r_squared(scores: np.ndarray, design: np.ndarray) -> np.ndarray:
-    """Adjusted R squared of every column of ``scores`` on ``design`` (which has its own intercept)."""
-    n_wells, n_terms = design.shape
-    coefficients = np.linalg.lstsq(design, scores, rcond=None)[0]
+    """Adjusted R squared of every column of ``scores`` on ``design`` (which has its own intercept).
+
+    The residual degrees of freedom use the rank of the design, because the design of
+    ``position_correction_utils.design_matrix`` has an indicator for every position, also
+    for the positions that the wells do not occupy. The result is NaN for every column
+    when there are no more wells than the rank, and for a column without variation.
+    """
+    n_wells = design.shape[0]
+    coefficients, _, rank, _ = np.linalg.lstsq(design, scores, rcond=None)
+    if n_wells <= rank:
+        return np.full(scores.shape[1], np.nan)
     residual = ((scores - design @ coefficients) ** 2).sum(axis=0)
     total = ((scores - scores.mean(axis=0)) ** 2).sum(axis=0)
-    return 1 - (residual / total) * (n_wells - 1) / (n_wells - n_terms)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return 1 - (residual / total) * (n_wells - 1) / (n_wells - rank)
 
 
 def pc_variance_table(
@@ -299,6 +311,13 @@ def partition_variance(
     on them. The position part of a component is the adjusted R squared of its scores on
     the row and column of the wells, and the status part is the squared correlation with
     the healthy against failing label.
+
+    The two parts overlap and do not add up: they are associations of the score, not
+    variance that one explains and the other does not. On the validation plates the
+    healthy wells are in columns 3, 9, and 11 and no other wells are, so the status label
+    is a sum of column indicators and a component that follows only the healthy columns
+    scores 1 on both. The row alone (``row_*``) is not confounded with the status there,
+    because every row has the same number of wells of each kind.
     """
     features = list(fit["features"])
     raw = medians[features].to_numpy(float)
@@ -308,11 +327,13 @@ def partition_variance(
     scores = {"before": pca.transform(raw), "after": pca.transform(corrected)}
     rows, cols = pcu.well_index(medians["well"])
     design = pcu.design_matrix(rows, cols)
+    row_design = design[:, : pcu.N_ROW_TERMS]  # the row indicators, which act as the intercept
     status = (medians["cell_type"] == healthy_label).to_numpy(float)
     records = []
     for stage, values in scores.items():
         variance = values.var(axis=0, ddof=1)
         position = np.clip(adjusted_r_squared(values, design), 0, None)
+        row_only = np.clip(adjusted_r_squared(values, row_design), 0, None)
         status_r2 = np.array(
             [np.corrcoef(values[:, k], status)[0, 1] ** 2 for k in range(n_components)]
         )
@@ -323,8 +344,10 @@ def partition_variance(
                     "component": f"PC{k + 1}",
                     "variance_pct_of_total": 100 * variance[k] / total_variance,
                     "position_pct_of_total": 100 * variance[k] * position[k] / total_variance,
+                    "row_pct_of_total": 100 * variance[k] * row_only[k] / total_variance,
                     "status_pct_of_total": 100 * variance[k] * status_r2[k] / total_variance,
                     "position_r2": position[k],
+                    "row_r2": row_only[k],
                     "status_r2": status_r2[k],
                 }
             )
@@ -337,7 +360,12 @@ def healthy_failing_difference(
     healthy_label: str,
     failing_label: str = "failing",
 ) -> pd.DataFrame:
-    """Length of the healthy minus failing DMSO difference of every plate, before and after the correction."""
+    """Length of the healthy minus failing DMSO difference of every plate, before and after the correction.
+
+    A plate without a healthy or without a failing DMSO well (after the cell filter of the
+    caller) has NaN lengths. The columns ``n_healthy_dmso_wells`` and ``n_failing_dmso_wells``
+    say which plates they are, and the caller should report them and count the valid plates.
+    """
     features = list(fit["features"])
     raw = medians[features].to_numpy(float)
     corrected = correct_well_medians(medians, fit)[features].to_numpy(float)
@@ -348,16 +376,86 @@ def healthy_failing_difference(
     for plate in sorted(medians["plate"].unique()):
         in_plate = (medians["plate"] == plate).to_numpy()
         h, f = in_plate & healthy, in_plate & failing
-        raw_difference = raw[h].mean(0) - raw[f].mean(0)
-        corrected_difference = corrected[h].mean(0) - corrected[f].mean(0)
+        n_healthy, n_failing = int(h.sum()), int(f.sum())
+        if n_healthy and n_failing:
+            raw_difference = raw[h].mean(0) - raw[f].mean(0)
+            corrected_difference = corrected[h].mean(0) - corrected[f].mean(0)
+            raw_length = np.linalg.norm(raw_difference)
+            corrected_length = np.linalg.norm(corrected_difference)
+        else:  # a plate without both groups has no difference (NaN, not an error)
+            raw_length = corrected_length = np.nan
         records.append(
             {
                 "plate": plate,
                 "platemap": int(medians.loc[in_plate, "platemap"].iloc[0]),
-                "raw": np.linalg.norm(raw_difference),
-                "corrected": np.linalg.norm(corrected_difference),
+                "n_healthy_dmso_wells": n_healthy,
+                "n_failing_dmso_wells": n_failing,
+                "raw": raw_length,
+                "corrected": corrected_length,
             }
         )
     table = pd.DataFrame(records)
     table["share_that_survives"] = table["corrected"] / table["raw"]
     return table
+
+
+def _chi_square_statistic(first: np.ndarray, second: np.ndarray) -> float:
+    """Pearson chi-square statistic of the contingency table of two label arrays."""
+    first_codes, first_levels = pd.factorize(first)
+    second_codes, second_levels = pd.factorize(second)
+    table = np.zeros((len(first_levels), len(second_levels)))
+    np.add.at(table, (first_codes, second_codes), 1)
+    expected = table.sum(axis=1, keepdims=True) * table.sum(axis=0, keepdims=True) / table.sum()
+    return float(((table - expected) ** 2 / expected).sum())
+
+
+def within_map_association_test(
+    maps: Sequence,
+    labels: Sequence,
+    positions: Sequence,
+    n_permutations: int = 2000,
+    seed: int = 0,
+) -> tuple[float, float]:
+    """Test whether a label (such as the pathway) is associated with the position within platemaps.
+
+    The statistic is the sum over the platemaps of the chi-square statistic of the table of
+    the labels against the positions of that platemap, so an association that has a different
+    direction on different platemaps does not cancel (as it can in one table of all
+    platemaps pooled). The p-value comes from permuting the labels within each platemap,
+    which keeps the number of wells of each label and position on every platemap and does not
+    rely on the asymptotic distribution of the statistic, which is poor for sparse tables.
+
+    Parameters
+    ----------
+    maps, labels, positions : Sequence
+        One entry per well: its platemap, its label, and its position (such as the plate row).
+    n_permutations : int, optional
+        Number of permutations, by default 2000.
+    seed : int, optional
+        Seed of the permutations, by default 0.
+
+    Returns
+    -------
+    tuple[float, float]
+        The statistic and the permutation p-value, ``(1 + permutations at least as large) /
+        (1 + n_permutations)``.
+    """
+    frame = pd.DataFrame(
+        {"map": np.asarray(maps), "label": np.asarray(labels), "position": np.asarray(positions)}
+    )
+    groups = [
+        (group["label"].to_numpy(), group["position"].to_numpy())
+        for _, group in frame.groupby("map")
+    ]
+
+    def statistic(permute: bool) -> float:
+        total = 0.0
+        for group_labels, group_positions in groups:
+            shuffled = rng.permutation(group_labels) if permute else group_labels
+            total += _chi_square_statistic(shuffled, group_positions)
+        return total
+
+    rng = np.random.default_rng(seed)
+    observed = statistic(False)
+    at_least = sum(statistic(True) >= observed for _ in range(n_permutations))
+    return observed, (1 + at_least) / (1 + n_permutations)

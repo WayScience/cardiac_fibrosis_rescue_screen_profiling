@@ -12,7 +12,7 @@
 # The profiles of this notebook have a different name, and the profiles of that notebook are not changed.
 # 
 # **Input** (per plate, from step 4b): `<plate>_sc_position_corrected.parquet`
-# The notebook reads the profiles from `data/single_cell_profiles/` when that folder exists, and from the folder on bandicoot otherwise; set `VALIDATION_PROFILE_DIR` to read another folder.
+# The notebook reads the profiles from `data/single_cell_profiles/` when that folder exists, and from the folder on bandicoot otherwise; set `VALIDATION_CORRECTED_PROFILE_DIR` to read another folder.
 # 
 # **Output** (in `data/bulk_profiles/`)
 # 
@@ -45,12 +45,14 @@ output_dir.mkdir(parents=True, exist_ok=True)
 output_pooled_feature_select_file = output_dir / "bulk_position_corrected_feature_selected.parquet"
 
 # Directory with the position-corrected single-cell profiles of step 4b
+# (set VALIDATION_CORRECTED_PROFILE_DIR to read another folder; VALIDATION_PROFILE_DIR is the
+# folder of the normalized profiles that step 4b reads, not of its output)
 local_profile_dir = pathlib.Path("./data/single_cell_profiles/")
 bandicoot_profile_dir = pathlib.Path(
     "~/mnt/bandicoot/CFReT_screening_data/validation_profiles/single_cell_profiles/"
 ).expanduser()
-if os.environ.get("VALIDATION_PROFILE_DIR"):
-    input_dir = pathlib.Path(os.environ["VALIDATION_PROFILE_DIR"]).expanduser()
+if os.environ.get("VALIDATION_CORRECTED_PROFILE_DIR"):
+    input_dir = pathlib.Path(os.environ["VALIDATION_CORRECTED_PROFILE_DIR"]).expanduser()
 elif any(local_profile_dir.glob("*_sc_position_corrected.parquet")):
     input_dir = local_profile_dir
 else:

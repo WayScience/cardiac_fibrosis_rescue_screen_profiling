@@ -23,7 +23,7 @@ format (``coef``, ``center``, ``features`` and ``amplitudes``), so
 """
 
 import pathlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -42,15 +42,49 @@ N_ROWS = len(pcu.ROWS)
 CHANNELS = ("Actin", "DNA", "ER", "Mito", "Golgi")
 
 
+def load_platemap_plate_numbers(platemap_dir: str | pathlib.Path) -> dict[str, int]:
+    """Read the plate number of every validation plate from its plate map.
+
+    Parameters
+    ----------
+    platemap_dir : str | pathlib.Path
+        Folder with one ``<plate barcode>_platemap.csv`` per plate, with the columns
+        ``plate_barcode`` and ``plate_number``.
+
+    Returns
+    -------
+    dict[str, int]
+        Plate barcode mapped to its plate number.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the folder has no plate map.
+    """
+    numbers = {}
+    for path in sorted(pathlib.Path(platemap_dir).glob("*_platemap.csv")):
+        platemap = pd.read_csv(path, usecols=["plate_barcode", "plate_number"])
+        numbers[str(platemap["plate_barcode"].iloc[0])] = int(platemap["plate_number"].iloc[0])
+    if not numbers:
+        raise FileNotFoundError(f"No *_platemap.csv files in {platemap_dir}")
+    return numbers
+
+
 def discover_validation_profiles(
-    profile_dir: str | pathlib.Path, suffix: str = "_sc_normalized.parquet"
+    profile_dir: str | pathlib.Path,
+    suffix: str = "_sc_normalized.parquet",
+    platemap_dir: str | pathlib.Path | None = None,
 ) -> pd.DataFrame:
     """Find the single-cell profile file of every validation plate.
 
     Looks for ``<plate><suffix>`` directly in ``profile_dir``.
     The result has the layout that ``position_correction_utils.build_well_medians``
-    expects, with the plate number (1 to 5, in the order of the plate names) as the platemap number, the
-    key of the amplitude of the plate in the fit.
+    expects, with the plate number as the platemap number, the key of the amplitude of
+    the plate in the fit.
+    The plate number is the one of the plate map of the plate (``platemap_dir``), so it
+    does not depend on which other plates are in the folder.
+    Without ``platemap_dir`` it is the position of the plate (1 to n) in the order of the
+    plate names, which is only right when the folder has all five plates.
 
     Parameters
     ----------
@@ -58,31 +92,45 @@ def discover_validation_profiles(
         Folder with the single-cell profile files of the validation plates.
     suffix : str, optional
         End of the file names, by default ``"_sc_normalized.parquet"``.
+    platemap_dir : str | pathlib.Path | None, optional
+        Folder with the plate maps (see ``load_platemap_plate_numbers``).
 
     Returns
     -------
     pd.DataFrame
-        One row per plate, sorted by plate name, with the columns ``plate`` (str),
+        One row per plate, sorted by plate number, with the columns ``plate`` (str),
         ``platemap`` (int) and ``path`` (pathlib.Path).
         The table is empty, with no columns, when no file matches.
+
+    Raises
+    ------
+    ValueError
+        If ``platemap_dir`` is given and a plate has no plate map.
     """
+    paths = sorted(pathlib.Path(profile_dir).glob(f"*{suffix}"))
+    if platemap_dir is None:
+        records = [
+            {"plate": path.name.removesuffix(suffix), "platemap": number, "path": path}
+            for number, path in enumerate(paths, start=1)
+        ]
+        return pd.DataFrame(records)
+    numbers = load_platemap_plate_numbers(platemap_dir)
+    plates = [path.name.removesuffix(suffix) for path in paths]
+    unknown = [plate for plate in plates if plate not in numbers]
+    if unknown:
+        raise ValueError(f"No plate map for the plates {unknown} in {platemap_dir}")
     records = [
-        {
-            "plate": path.name.removesuffix(suffix),
-            "platemap": number,
-            "path": path,
-        }
-        for number, path in enumerate(
-            sorted(pathlib.Path(profile_dir).glob(f"*{suffix}")), start=1
-        )
+        {"plate": plate, "platemap": numbers[plate], "path": path}
+        for plate, path in zip(plates, paths, strict=True)
     ]
-    return pd.DataFrame(records)
+    return pd.DataFrame(records).sort_values("platemap", ignore_index=True)
 
 
 def load_or_build_well_medians(
     cache_path: str | pathlib.Path,
     profile_dir: str | pathlib.Path,
     n_jobs: int = 1,
+    platemap_dir: str | pathlib.Path | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Load the median profile of every well, or build it from the single-cell profiles.
 
@@ -101,6 +149,9 @@ def load_or_build_well_medians(
         is missing.
     n_jobs : int, optional
         Number of plates to read in parallel, by default 1.
+    platemap_dir : str | pathlib.Path | None, optional
+        Folder with the plate maps, which give the plate numbers (see
+        ``discover_validation_profiles``). Only used when the cache is missing.
 
     Returns
     -------
@@ -120,7 +171,7 @@ def load_or_build_well_medians(
         well_medians = pd.read_parquet(cache_path)
         return well_medians, [c for c in well_medians.columns if c not in meta_columns]
     plate_table = discover_validation_profiles(
-        pathlib.Path(profile_dir).resolve(strict=True)
+        pathlib.Path(profile_dir).resolve(strict=True), platemap_dir=platemap_dir
     )
     if plate_table.empty:
         raise FileNotFoundError(f"No *_sc_normalized.parquet files in {profile_dir}")
@@ -265,7 +316,9 @@ def with_plate_amplitudes(fit: dict, amplitudes: pd.DataFrame) -> dict:
     Returns
     -------
     dict
-        Copy of ``fit`` with the key ``amplitudes`` (plate number mapped to its amplitude).
+        Copy of ``fit`` with the key ``amplitudes`` (plate number mapped to its amplitude)
+        and the key ``plate_numbers`` (plate name mapped to its plate number), so that a
+        plate gets its own amplitude whatever other plates are processed with it.
     """
     return {
         **fit,
@@ -275,7 +328,109 @@ def with_plate_amplitudes(fit: dict, amplitudes: pd.DataFrame) -> dict:
                 amplitudes["plate_number"], amplitudes["shrunk_amplitude"], strict=True
             )
         },
+        "plate_numbers": {
+            str(plate): int(number)
+            for plate, number in zip(
+                amplitudes["plate"], amplitudes["plate_number"], strict=True
+            )
+        },
     }
+
+
+def validate_plate_amplitudes(
+    amplitudes: pd.DataFrame, expected_plates: Iterable[str]
+) -> None:
+    """Check that every expected plate has a finite amplitude before the fit is saved.
+
+    Parameters
+    ----------
+    amplitudes : pd.DataFrame
+        Output of ``shrunk_plate_amplitudes``.
+    expected_plates : Iterable[str]
+        Barcodes of the plates that the fit has to cover.
+
+    Raises
+    ------
+    ValueError
+        If a plate is missing (for example because no well of it has enough cells) or
+        has an amplitude, a standard error, or a shrunk amplitude that is not finite.
+        The message names the plates.
+    """
+    present = set(amplitudes["plate"])
+    missing = [plate for plate in expected_plates if plate not in present]
+    finite = np.isfinite(
+        amplitudes[["amplitude", "standard_error", "shrunk_amplitude"]].to_numpy(float)
+    ).all(axis=1)
+    invalid = amplitudes.loc[~finite, "plate"].tolist()
+    if missing or invalid:
+        raise ValueError(
+            f"The fit does not cover every plate. Missing plates: {missing}. "
+            f"Plates without a finite amplitude: {invalid}."
+        )
+
+
+def save_validation_fit(fit: dict, path: str | pathlib.Path) -> None:
+    """Save a fit of the validation plates with the plate that owns each amplitude.
+
+    This is ``position_correction_utils.save_fit`` with the arrays ``plate_names`` and
+    ``plate_numbers`` (``fit["plate_numbers"]``) added. ``position_correction_utils.load_fit``
+    still reads the file and ignores them.
+    """
+    amplitudes = fit["amplitudes"]
+    plate_numbers = fit["plate_numbers"]
+    np.savez_compressed(
+        path,
+        coef=fit["coef"].astype("float32"),
+        center=fit["center"].astype("float32"),
+        features=np.array(fit["features"]),
+        amplitude_platemaps=np.array(list(amplitudes), dtype=int),
+        amplitude_values=np.array(list(amplitudes.values()), dtype=float),
+        plate_names=np.array(list(plate_numbers)),
+        plate_numbers=np.array(list(plate_numbers.values()), dtype=int),
+    )
+
+
+def load_validation_fit(path: str | pathlib.Path) -> dict:
+    """Load a fit written by ``save_validation_fit``.
+
+    Returns the output of ``position_correction_utils.load_fit`` with the key
+    ``plate_numbers`` (plate name mapped to its plate number).
+
+    Raises
+    ------
+    ValueError
+        If the file has no plate names (it was saved by ``save_fit``): rerun
+        ``1.fit_position_correction.ipynb``.
+    """
+    fit = pcu.load_fit(path)
+    stored = np.load(path, allow_pickle=False)
+    if "plate_names" not in stored.files:
+        raise ValueError(
+            f"{path} does not say which plate owns each amplitude. "
+            "Run 4a.position_correction/1.fit_position_correction.ipynb again."
+        )
+    fit["plate_numbers"] = dict(
+        zip(stored["plate_names"].tolist(), stored["plate_numbers"].tolist(), strict=True)
+    )
+    return fit
+
+
+def plate_number_in_fit(fit: dict, plate: str) -> int:
+    """Return the plate number that the amplitude of ``plate`` is stored under.
+
+    Raises
+    ------
+    KeyError
+        If the fit has no amplitude for the plate, or the amplitude is not finite.
+    """
+    if plate not in fit["plate_numbers"]:
+        raise KeyError(
+            f"The fit has no amplitude for the plate {plate}; it covers {sorted(fit['plate_numbers'])}"
+        )
+    number = fit["plate_numbers"][plate]
+    if not np.isfinite(fit["amplitudes"].get(number, np.nan)):
+        raise KeyError(f"The amplitude of the plate {plate} is not finite")
+    return int(number)
 
 
 def shrunk_plate_amplitudes(
@@ -310,14 +465,26 @@ def shrunk_plate_amplitudes(
         The output of ``plate_amplitudes`` with the column ``shrunk_amplitude`` added.
     """
     table = plate_amplitudes(well_medians, fit, min_cells, n_boot, seed)
+    # a plate whose amplitude or standard error is undefined is left out of the shrinking
+    # and gets no shrunk amplitude (``validate_plate_amplitudes`` reports it)
+    usable = np.isfinite(table[["amplitude", "standard_error"]].to_numpy(float)).all(axis=1)
     raw = {
         int(row.plate_number): (row.amplitude, row.standard_error)
-        for row in table.itertuples()
+        for row, ok in zip(table.itertuples(), usable, strict=True)
+        if ok
     }
     table["shrunk_amplitude"] = [
-        pcu.shrink_amplitude(raw, int(number)) for number in table["plate_number"]
+        pcu.shrink_amplitude(raw, int(number)) if ok and len(raw) >= 3 else np.nan
+        for number, ok in zip(table["plate_number"], usable, strict=True)
     ]
     return table
+
+
+def _tilt_scale(profiles: np.ndarray, tilt_values: np.ndarray) -> float:
+    """``position_correction_utils.amplitude``, or NaN when the tilt has no variation."""
+    if not (tilt_values * tilt_values).sum() > 0:
+        return float("nan")
+    return pcu.amplitude(profiles, tilt_values)
 
 
 def plate_amplitudes(
@@ -326,6 +493,7 @@ def plate_amplitudes(
     min_cells: int = 50,
     n_boot: int = 200,
     seed: int = 0,
+    min_valid_fraction: float = 0.9,
 ) -> pd.DataFrame:
     """Measure how strongly the tilt shows in each replicate plate.
 
@@ -349,12 +517,18 @@ def plate_amplitudes(
         Number of resamples of the standard error, by default 200.
     seed : int, optional
         Seed of the resampling, by default 0.
+    min_valid_fraction : float, optional
+        A resample of the wells of a plate that has no variation in the tilt has no
+        amplitude. The standard error is NaN when fewer than this fraction of the
+        resamples have one, by default 0.9.
 
     Returns
     -------
     pd.DataFrame
-        One row per plate with the columns ``plate``, ``plate_number`` (1 to 5, in the
-        order of the plate names), ``amplitude`` and ``standard_error``.
+        One row per plate with the columns ``plate``, ``plate_number`` (the ``platemap``
+        column of ``well_medians``, which is the plate number of the plate map),
+        ``amplitude`` and ``standard_error``. The amplitude is NaN when the tilt has no
+        variation within the groups of the plate.
     """
     wells = well_medians[well_medians["n"] >= min_cells].reset_index(drop=True)
     features = list(fit["features"])
@@ -363,8 +537,10 @@ def plate_amplitudes(
     tilt_values = pcu.tilt(fit["coef"], fit["center"], rows, cols)
     group = (wells["treatment"] + "|" + wells["cell_type"]).to_numpy()
     rng = np.random.default_rng(seed)
+    plate_numbers = wells.groupby("plate")["platemap"].first()
     records = []
-    for number, plate in enumerate(sorted(wells["plate"].unique()), start=1):
+    for plate in sorted(wells["plate"].unique()):
+        number = int(plate_numbers[plate])
         in_plate = (wells["plate"] == plate).to_numpy()
         labels = group[in_plate]
         centered_profiles = profiles[in_plate] - pd.DataFrame(profiles[in_plate]).groupby(labels).transform("mean").to_numpy()
@@ -373,13 +549,16 @@ def plate_amplitudes(
         boots = []
         for _ in range(n_boot):
             draw = rng.integers(0, n_wells, n_wells)
-            boots.append(pcu.amplitude(centered_profiles[draw], centered_tilt[draw]))
+            boots.append(_tilt_scale(centered_profiles[draw], centered_tilt[draw]))
+        valid = np.array(boots)[np.isfinite(boots)]
         records.append(
             {
                 "plate": plate,
                 "plate_number": number,
-                "amplitude": pcu.amplitude(centered_profiles, centered_tilt),
-                "standard_error": float(np.std(boots)),
+                "amplitude": _tilt_scale(centered_profiles, centered_tilt),
+                "standard_error": float(np.std(valid))
+                if len(valid) >= max(2, min_valid_fraction * n_boot)
+                else np.nan,
             }
         )
     return pd.DataFrame(records)
@@ -537,7 +716,11 @@ def position_variance_parts(
             (position_mean[in_compound] - compound_mean[in_compound]) ** 2
         ).sum(axis=0)
         within += noise
-        chance += noise * (n_positions - 1) / (n_wells - n_positions)
+        if n_wells <= n_positions:
+            # one well per position leaves no replicate to estimate the chance level from
+            chance += np.nan
+        else:
+            chance += noise * (n_positions - 1) / (n_wells - n_positions)
     return between - chance, between + within
 
 
@@ -618,8 +801,8 @@ def well_score_table(
     """Combine the principal component scores of wells before and after correction.
 
     This is ``position_correction_effect_utils.well_score_table`` with the plate number
-    (1 to 5, in the order of the plate names) in the column ``plate_number``, because the
-    validation plates share one platemap.
+    (the ``platemap`` column of ``medians``, which is the number of the plate map of the
+    plate) in the column ``plate_number``, because the validation plates share one layout.
 
     Parameters
     ----------
@@ -639,8 +822,8 @@ def well_score_table(
         place of ``platemap_number``.
     """
     table = pce.well_score_table(medians, before, after)
-    numbers = {p: i + 1 for i, p in enumerate(sorted(medians["plate"].unique()))}
-    table.insert(2, "plate_number", table["plate"].map(numbers))
+    # the plate number of the plate map, which does not depend on the plates in the table
+    table.insert(2, "plate_number", table["platemap_number"])
     return table.drop(columns="platemap_number")
 
 
@@ -784,8 +967,13 @@ def row_prediction_scores(rows: np.ndarray, probabilities: np.ndarray) -> dict:
         axis=1, keepdims=True
     )
     is_row_b = rows == 0
-    return {
-        "macro_auc": float(
+    if len(present) < 2:
+        macro_auc = float("nan")  # one row has nothing to be told apart from
+    elif len(present) == 2:
+        # two rows: scikit-learn wants the binary form, and the two one-vs-rest AUCs are equal
+        macro_auc = float(roc_auc_score(rows == present[1], present_probabilities[:, 1]))
+    else:
+        macro_auc = float(
             roc_auc_score(
                 rows,
                 present_probabilities,
@@ -793,7 +981,9 @@ def row_prediction_scores(rows: np.ndarray, probabilities: np.ndarray) -> dict:
                 average="macro",
                 labels=present,
             )
-        ),
+        )
+    return {
+        "macro_auc": macro_auc,
         "row_b_auc": float(roc_auc_score(is_row_b, probabilities[:, 0]))
         if 0 < is_row_b.sum() < len(rows)
         else float("nan"),
@@ -807,9 +997,9 @@ def control_contrast(
 ) -> pd.DataFrame:
     """Measure the healthy minus failing DMSO contrast of every plate.
 
-    The healthy controls sit in row B and the failing controls in row E, and the
-    correction shifts both, so the correction changes this contrast (see the assumptions in
-    ``3a.position_correction/0.fit_position_correction.ipynb``).
+    The healthy and the failing DMSO wells are selected by ``treatment`` and ``cell_type``
+    (not by row). Both sit in all six rows, in blocks of columns (failing in columns 2, 4,
+    and 10, healthy in 3, 9, and 11), so a tilt of rows and columns shifts them alike.
 
     Parameters
     ----------
@@ -890,12 +1080,43 @@ def tilt_recovery(
     return float(np.median(cosines)), float(pcu.amplitude(tilt_estimate, centered_truth))
 
 
-def mean_position_pattern(
+def mean_row_pattern(
     wells: pd.DataFrame, features: Sequence[str]
-) -> tuple[pd.Index, np.ndarray]:
-    """Mean profile of every position (the plates averaged), centered over the positions."""
-    means = wells.groupby("well")[list(features)].mean()
-    return means.index, means.to_numpy(float) - means.to_numpy(float).mean(axis=0)
+) -> tuple[list[str], np.ndarray]:
+    """Mean profile of every plate row (rows B to G), centered over the rows.
+
+    Parameters
+    ----------
+    wells : pd.DataFrame
+        Well medians with the column ``well`` (such as ``"B02"``) and the features.
+    features : Sequence[str]
+        Names of the feature columns.
+
+    Returns
+    -------
+    tuple[list[str], np.ndarray]
+        The row labels and the rows by features pattern, each feature centered over the rows.
+
+    Raises
+    ------
+    ValueError
+        If a row has no well.
+    """
+    means = (
+        wells.assign(row=wells["well"].str[0])
+        .groupby("row")[list(features)]
+        .mean()
+        .reindex(list(pcu.ROWS))
+    )
+    if means.isna().any().any():
+        raise ValueError("A plate row has no well, so the row pattern is not defined")
+    return list(means.index), means.to_numpy(float) - means.to_numpy(float).mean(axis=0)
+
+
+def tilt_row_pattern(fit: dict) -> np.ndarray:
+    """Row effects of a tilt (rows B to G by features), each feature centered over the rows."""
+    rows = fit["coef"][: pcu.N_ROW_TERMS]
+    return rows - rows.mean(axis=0)
 
 
 def cosine_and_slope(observed: np.ndarray, predicted: np.ndarray) -> tuple[float, float]:
@@ -938,7 +1159,8 @@ def plate_layout_grid(
     (a number of ``column_numbers``) and ``value_column``.
     """
     grid = np.full((len(row_labels), len(column_numbers)), np.nan)
-    first_column = column_numbers[0]
+    row_index = {label: i for i, label in enumerate(row_labels)}
+    column_index = {number: i for i, number in enumerate(column_numbers)}
     for _, well in table[table["plate"] == plate].iterrows():
-        grid[list(row_labels).index(well["row"]), well["column"] - first_column] = well[value_column]
+        grid[row_index[well["row"]], column_index[well["column"]]] = well[value_column]
     return grid

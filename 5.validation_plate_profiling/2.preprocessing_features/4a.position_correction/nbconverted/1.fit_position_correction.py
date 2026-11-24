@@ -56,7 +56,8 @@ import validation_position_utils as vpu
 # In[2]:
 
 
-# folder with the <plate>_sc_normalized.parquet files (only read when the cache is missing)
+# folder with the <plate>_sc_normalized.parquet files (only read when the cache is missing:
+# an existing well_medians.parquet is used whatever this folder is, so delete it when the profiles change)
 profile_dir = pathlib.Path(
     os.environ.get(
         "VALIDATION_PROFILE_DIR",
@@ -64,6 +65,9 @@ profile_dir = pathlib.Path(
     )
 ).expanduser()
 n_jobs = int(os.environ.get("N_JOBS", "4"))
+
+# plate maps, which give the plate number of every plate
+platemap_dir = pathlib.Path("../../metadata/platemaps")
 
 output_dir = pathlib.Path(".")
 figure_dir = output_dir / "figures" / "fit"
@@ -86,7 +90,7 @@ min_cells = 50  # minimum cells for a well to be used (as in the screen)
 
 
 well_medians, features = vpu.load_or_build_well_medians(
-    well_medians_cache, profile_dir, n_jobs=n_jobs
+    well_medians_cache, profile_dir, n_jobs=n_jobs, platemap_dir=platemap_dir
 )
 
 print("Plates:", well_medians["plate"].nunique())
@@ -117,8 +121,10 @@ print("Tilt map:", tilt_map["coef"].shape[0], "row and column terms for", len(fe
 
 
 amplitudes = vpu.shrunk_plate_amplitudes(well_medians, tilt_map, min_cells)
+# every plate of the plate maps needs a finite amplitude, or the saved fit stays as it is
+vpu.validate_plate_amplitudes(amplitudes, vpu.load_platemap_plate_numbers(platemap_dir))
 fit = vpu.with_plate_amplitudes(tilt_map, amplitudes)
-pcu.save_fit(fit, output_dir / "position_correction_fit.npz")
+vpu.save_validation_fit(fit, output_dir / "position_correction_fit.npz")
 print("Amplitude of each plate:", fit["amplitudes"])
 amplitudes.to_csv(results_dir / "plate_amplitudes.csv", index=False)
 amplitudes.round(3)
