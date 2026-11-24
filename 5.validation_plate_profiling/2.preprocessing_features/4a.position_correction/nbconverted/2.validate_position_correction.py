@@ -72,6 +72,10 @@ min_cells = 50  # minimum cells for a well to be used
 well_medians, features = vpu.load_or_build_well_medians(
     well_medians_cache, ".", platemap_dir="../../metadata/platemaps"
 )
+# The features are chosen on all plates, so the held-out plate must not decide which ones stay. This holds
+# when no feature has a missing value on any plate (the loader drops a feature with a missing value in any well).
+if well_medians[features].isna().any().any():
+    raise ValueError("A feature has a missing value: select the features on the training plates only")
 wells = well_medians[well_medians["n"] >= min_cells].reset_index(drop=True)
 rows, cols = pcu.well_index(wells["well"])
 is_dmso = (wells["treatment"] == "DMSO").to_numpy()
