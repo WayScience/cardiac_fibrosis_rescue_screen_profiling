@@ -14,7 +14,7 @@
 # **Input** (per plate, from step 4b): `<plate>_sc_position_corrected.parquet`
 # The notebook reads the profiles from `data/single_cell_profiles/` when that folder exists, and from the folder on bandicoot otherwise; set `VALIDATION_PROFILE_DIR` to read another folder.
 # 
-# **Output** (in `data/bulk_profiles/`, with a copy on bandicoot)
+# **Output** (in `data/bulk_profiles/`)
 # 
 # - `bulk_position_corrected_feature_selected.parquet`: pooled well-level profiles of all plates after feature selection
 
@@ -29,7 +29,6 @@ import sys
 
 import pandas as pd
 from pycytominer import aggregate, feature_select
-from pycytominer.cyto_utils import output
 
 sys.path.append("../../utils")
 import validation_position_utils as vpu
@@ -44,15 +43,6 @@ import validation_position_utils as vpu
 output_dir = pathlib.Path("./data/bulk_profiles/")
 output_dir.mkdir(parents=True, exist_ok=True)
 output_pooled_feature_select_file = output_dir / "bulk_position_corrected_feature_selected.parquet"
-
-# Directory on bandicoot to save a copy of the bulk profiles
-# (set BANDICOOT_OUTPUT_DIR to save the copy somewhere else)
-bandicoot_output_dir = pathlib.Path(
-    os.environ.get(
-        "BANDICOOT_OUTPUT_DIR",
-        "~/mnt/bandicoot/CFReT_screening_data/validation_profiles/bulk_profiles/",
-    )
-).expanduser()
 
 # Directory with the position-corrected single-cell profiles of step 4b
 local_profile_dir = pathlib.Path("./data/single_cell_profiles/")
@@ -164,31 +154,4 @@ feature_select(
     **feature_select_kwargs,
 )
 print(f"Saved feature-selected profiles to {output_pooled_feature_select_file}")
-
-
-# ## Save a copy of the profiles to bandicoot
-
-# In[6]:
-
-
-output(
-    df=pd.read_parquet(output_pooled_feature_select_file),
-    output_filename=bandicoot_output_dir / output_pooled_feature_select_file.name,
-    output_type="parquet",
-)
-print(f"Saved a copy of the bulk profiles to: {bandicoot_output_dir}")
-
-
-# ## Check the output file
-
-# In[7]:
-
-
-test_df = pd.read_parquet(output_pooled_feature_select_file)
-print(test_df.shape)
-print("Plates:", test_df.Metadata_Plate.unique())
-print(
-    "Metadata columns:", [col for col in test_df.columns if col.startswith("Metadata_")]
-)
-test_df.head(2)
 

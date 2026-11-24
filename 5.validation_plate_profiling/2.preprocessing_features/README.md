@@ -55,7 +55,8 @@ The single-cell and bulk notebooks save each output locally with the `output_fil
 - local: `data/single_cell_profiles/` and `data/bulk_profiles/`
 - bandicoot: the same folder names under `~/mnt/bandicoot/CFReT_screening_data/validation_profiles/`
 
-Steps 4b and 5 follow the same convention, with new file names (`*_sc_position_corrected*` and `bulk_position_corrected_feature_selected`), so they do not overwrite the profiles of the earlier steps.
+Steps 4b and 5 save locally only, with pycytominer's `output()` function and the `output_file` parameter of `feature_select`, and do not write to bandicoot.
+Their file names are new (`*_sc_position_corrected*` and `bulk_position_corrected_feature_selected`), so they do not overwrite the profiles of the earlier steps.
 They read the profiles of step 2 from `data/single_cell_profiles/` when it exists and from bandicoot otherwise.
 
 ## Run the module
