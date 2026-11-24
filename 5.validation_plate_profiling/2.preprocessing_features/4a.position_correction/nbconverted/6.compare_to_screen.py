@@ -8,8 +8,7 @@
 # 
 # 1. **Variance by principal component, split into position and heart status.** The principal components of the well profiles, with the part of each component that plate position (row plus column) explains in red and the part that the heart status of the cells (healthy against failing) explains in blue, before and after the correction.
 # 2. **Survival of the healthy against failing difference.** The length of the difference between the healthy and the failing DMSO profile on every plate, before and after the correction.
-# 3. **What the tilt estimates, and how well.** The size of each row and column term of the tilt on the validation plates, with its uncertainty from leaving each plate out in turn, and the position variation of every feature before and after the correction.
-# 4. **Compound placement in the screen.** Whether the position of a compound on the screen platemaps is independent of the compound.
+# 3. **Compound placement in the screen.** Whether the position of a compound on the screen platemaps is independent of the compound.
 # 
 # **Input**
 # 
@@ -17,7 +16,7 @@
 # - `../../../4.image_based_profiling/3a.position_correction/well_medians.parquet` and `position_correction_fit.npz` (screen; the cache of the well medians is git-ignored, so run the screen's fit notebook first when it is missing)
 # - `../../../metadata/updated_platemaps/` (screen platemaps)
 # 
-# **Output**: tables in `results/` and figures in `figures/compare_to_screen/`.
+# **Output**: the three figures in `figures/compare_to_screen/`, which is the only folder with screen data. The tables behind them are printed in the notebook.
 
 # ## Import libraries
 
@@ -45,8 +44,6 @@ import validation_position_utils as vpu
 
 figure_dir = pathlib.Path("figures") / "compare_to_screen"
 figure_dir.mkdir(parents=True, exist_ok=True)
-results_dir = pathlib.Path("results")
-results_dir.mkdir(exist_ok=True)
 
 screen_dir = pathlib.Path("../../../4.image_based_profiling/3a.position_correction")
 platemap_dir = pathlib.Path("../../../metadata/updated_platemaps")
@@ -148,7 +145,6 @@ partitions = {
     name: partition_variance(data["all_wells"] if name == "Screen" else data["medians"], data["fit"], data["healthy"])
     for name, data in datasets.items()
 }
-pd.concat(partitions, names=["dataset"]).reset_index(level=0).to_csv(results_dir / "scree_position_and_heart_status.csv", index=False)
 for name, table in partitions.items():
     print(f"\n{name}: share of the variance of the first {n_components} components, by stage")
     print(
@@ -221,7 +217,6 @@ def healthy_failing_difference(medians, fit, healthy_label):
 
 
 survival = {name: healthy_failing_difference(data["medians"], data["fit"], data["healthy"]) for name, data in datasets.items()}
-pd.concat(survival, names=["dataset"]).reset_index(level=0).to_csv(results_dir / "healthy_failing_survival.csv", index=False)
 print(pd.DataFrame({name: table[["raw", "corrected", "share_that_survives"]].median() for name, table in survival.items()}).round(2).to_string())
 
 
@@ -261,117 +256,13 @@ fig.savefig(figure_dir / "healthy_failing_survival.png", dpi=150, bbox_inches="t
 plt.show()
 
 
-# ## 3. What the tilt estimates on the validation plates, and how well
-# 
-# **The model.** The correction subtracts, from every feature, a position effect that is the sum of one effect for the row of the well and one effect for its column (the tilt).
-# The model of a feature that the fit solves has one effect for each group (a compound, or the DMSO of one cell type), five row effects (rows C to G against row B), and ten column effects, with a tiny ridge penalty instead of a reference column (they are reported against column 2).
-# The groups sit in blocks of columns, so three column offsets (failing, healthy, compound columns) cannot be told from the group effects; the ridge sets them to zero.
-# It is fit on the wells of the 15 compounds and of the two kinds of DMSO, separately for each of the 2,453 features, with the replicate plates averaged.
-# The group effects are there so that what a compound or a cell type does is not counted as position.
-# The DMSO of each cell type is at 18 positions on every plate, three in each row.
-# A compound is at 8 positions on a single plate (columns 5 to 8, in all six rows), so a compound adds position information only through the other compounds and the DMSO wells that share its rows and columns.
-# 
-# **How well each term is determined.** We refit the tilt five times, each time without one plate, and measure how much every row and column term changes (the jackknife standard error).
-# A term whose estimate changes as much as its own size is not determined by these plates.
-
-# In[7]:
-
-
-wells = datasets["Validation"]["medians"]
-features = list(datasets["Validation"]["fit"]["features"])
-n_row_terms = pcu.N_ROW_TERMS
-
-
-def position_terms(fit):
-    """Row effects against row B and column effects against column 2, one vector over features per term."""
-    coefficients = fit["coef"]
-    rows = coefficients[1:n_row_terms] - coefficients[0]
-    cols = coefficients[n_row_terms:]
-    return np.vstack([rows, cols])
-
-
-term_names = [f"Row {row} vs B" for row in "CDEFG"] + [f"Column {c} vs 2" for c in range(3, 12)]
-full_terms = position_terms(vpu.fit_compound_adjusted_tilt(wells, features, min_cells, include_controls=True))
-plates = sorted(wells["plate"].unique())
-leave_one_out = np.stack(
-    [
-        position_terms(
-            vpu.fit_compound_adjusted_tilt(wells[wells["plate"] != plate], features, min_cells, include_controls=True)
-        )
-        for plate in plates
-    ]
-)
-n = len(plates)
-jackknife_se = np.sqrt((n - 1) / n * ((leave_one_out - leave_one_out.mean(axis=0)) ** 2).sum(axis=0))
-term_table = pd.DataFrame(
-    {
-        "term": term_names,
-        "size": np.linalg.norm(full_terms, axis=1),
-        "uncertainty": np.linalg.norm(jackknife_se, axis=1),
-    }
-)
-term_table["size_over_uncertainty"] = term_table["size"] / term_table["uncertainty"]
-term_table.to_csv(results_dir / "tilt_term_uncertainty.csv", index=False)
-term_table.round(2)
-
-
-# In[8]:
-
-
-fig, ax = plt.subplots(figsize=(8, 6))
-y = np.arange(len(term_table))[::-1]
-term_colors = ["#6a3d9a" if name.startswith("Row") else "#ff7f00" for name in term_table["term"]]
-ax.barh(y, term_table["size"], color=term_colors, alpha=0.85)
-ax.errorbar(term_table["size"], y, xerr=term_table["uncertainty"], fmt="none", ecolor="black", capsize=3, lw=1.2)
-ax.set_yticks(y)
-ax.set_yticklabels(term_table["term"])
-ax.set_xlabel("Size of the term (length over features), with its uncertainty (bar) from leaving out each plate")
-ax.set_title("The 14 position terms of the tilt on the validation plates (purple: rows, orange: columns)", fontsize=10)
-fig.tight_layout()
-fig.savefig(figure_dir / "tilt_terms_and_uncertainty.png", dpi=150, bbox_inches="tight")
-plt.show()
-
-
-# **The position variation of every feature.**
-# Each point is one feature: the share of the variation within the DMSO groups that is position (see `5.quantify_position_effect.ipynb`), before the correction (horizontal) and after it (vertical).
-# A feature on the diagonal is not changed by the correction, and a feature near zero has no position effect left.
-# On the left, the tilt is fit on all plates, so it fits the wells that it is judged on.
-# On the right, the tilt was fit without the plate that is judged, which is the situation of a new plate.
-
-# In[9]:
-
-
-shares = pd.read_csv(results_dir / "position_variance_by_feature.csv").dropna(subset=["raw", "in_sample", "held_out"])
-channel_colors = {"Actin": "#e41a1c", "Golgi": "#377eb8", "ER": "#4daf4a", "DNA": "#984ea3", "Mito": "#ff7f00"}
-fig, axes = plt.subplots(1, 2, figsize=(13, 5.8), sharex=True, sharey=True)
-for ax, column, title in (
-    (axes[0], "in_sample", "Tilt fit on all plates (in-sample)"),
-    (axes[1], "held_out", "Tilt fit without the plate (held-out)"),
-):
-    others = ~shares["channel"].isin(channel_colors)
-    ax.scatter(shares.loc[others, "raw"], shares.loc[others, column], s=7, color="#bdbdbd", alpha=0.5, lw=0, label="Other")
-    for channel, color in channel_colors.items():
-        subset = shares[shares["channel"] == channel]
-        ax.scatter(subset["raw"], subset[column], s=7, color=color, alpha=0.5, lw=0, label=channel)
-    ax.plot([-0.2, 0.9], [-0.2, 0.9], color="black", lw=1, ls="--")
-    ax.axhline(0.2, color="grey", lw=0.8, ls=":")
-    share_left = (shares[column] > 0.2).mean()
-    ax.set_title(f"{title}: {share_left:.0%} of the features stay above 0.2", fontsize=10)
-    ax.set_xlabel("Position share before the correction")
-axes[0].set_ylabel("Position share after the correction")
-axes[1].legend(fontsize=8, markerscale=2.5, loc="upper left")
-fig.tight_layout()
-fig.savefig(figure_dir / "position_variance_before_vs_after.png", dpi=150, bbox_inches="tight")
-plt.show()
-
-
-# ## 4. Compound placement in the screen
+# ## 3. Compound placement in the screen
 # 
 # The tilt of the screen, and its use in the rescue score, assume that compounds were placed on the plates independently of the position.
 # Each screen compound sits at one position of its platemap, so the assumption cannot be tested within a compound.
 # We test two things: whether the compound classes (pathways) differ by plate row, and whether the compound identifier (a running number) follows the order of the wells on a platemap.
 
-# In[10]:
+# In[7]:
 
 
 frames = []
@@ -395,11 +286,10 @@ for platemap, group in screen_compounds.groupby("platemap"):
     result = spearmanr(group["compound_number"], group["reading_order"], nan_policy="omit")
     placement.append({"platemap": platemap, "n_compounds": len(group), "spearman_rho": result.statistic, "p_value": result.pvalue})
 placement = pd.DataFrame(placement)
-placement.to_csv(results_dir / "screen_compound_placement.csv", index=False)
 print(placement.round(3).to_string(index=False))
 
 
-# In[11]:
+# In[8]:
 
 
 fig, ax = plt.subplots(figsize=(9, 4.6))

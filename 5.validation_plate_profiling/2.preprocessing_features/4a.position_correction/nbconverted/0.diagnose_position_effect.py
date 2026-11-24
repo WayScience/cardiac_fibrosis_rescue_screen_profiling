@@ -28,8 +28,6 @@
 # **Output** (in this folder)
 # 
 # - `well_medians.parquet`: the median profile of every well of every plate (a cache that git ignores).
-# - `results/pc_variance_explained_by_position.csv`: the fraction of each principal component that plate row, plate column, plate, and treatment explain.
-# - `results/pc_explained_by_row_and_cell_number.csv`: how much plate row and the number of cells explain of each component.
 # - `figures/diagnostics/`: the figures below.
 # 
 # **Method**
@@ -72,9 +70,7 @@ profile_dir = pathlib.Path(
 n_jobs = int(os.environ.get("N_JOBS", "4"))
 
 output_dir = pathlib.Path(".")
-results_dir = output_dir / "results"
 figure_dir = output_dir / "figures" / "diagnostics"
-results_dir.mkdir(exist_ok=True)
 figure_dir.mkdir(parents=True, exist_ok=True)
 
 # well summary is cached because reading the five plates takes a few minutes
@@ -230,9 +226,6 @@ within_table, _, _ = variance_table(
 )
 
 variance_by_position = pd.concat([all_table, failing_table, healthy_table, within_table])
-variance_by_position.to_csv(
-    results_dir / "pc_variance_explained_by_position.csv", index=False
-)
 for analysis, table in variance_by_position.groupby("analysis", sort=False):
     print(f"\n{analysis}")
     print(table.drop(columns="analysis").head(6).round(3).to_string(index=False))
@@ -357,7 +350,6 @@ density.append(
     )
 )
 density = pd.concat(density)
-density.to_csv(results_dir / "pc_explained_by_row_and_cell_number.csv", index=False)
 print(density.round(2).to_string(index=False))
 
 log_cells = np.log(dmso_wells["n"])

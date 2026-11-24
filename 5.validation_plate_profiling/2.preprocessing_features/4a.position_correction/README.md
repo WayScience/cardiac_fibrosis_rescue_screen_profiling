@@ -46,7 +46,7 @@ This layout differs from the screen in three ways that matter for the correction
 | [`3.effect_on_feature_space.ipynb`](./3.effect_on_feature_space.ipynb) | Computes the size of the tilt by feature family and the principal components of the wells before and after the correction | `2.effect_on_feature_space` |
 | [`4.plot_effect_on_feature_space.ipynb`](./4.plot_effect_on_feature_space.ipynb) (R) | Draws the effect figures from those tables | `3.plot_effect_on_feature_space` |
 | [`5.quantify_position_effect.ipynb`](./5.quantify_position_effect.ipynb) | Measures the position effect directly: the position variation of every feature within the DMSO groups, position against biology, whether the tilt carries over between cell types, and the DMSO wells on the layout of each plate, before and after the correction | none |
-| [`6.compare_to_screen.ipynb`](./6.compare_to_screen.ipynb) | Puts the validation plates next to the screen: the variance of the principal components split into position and heart status, the survival of the healthy against failing difference, the uncertainty of the tilt terms, and the placement of compounds on the screen platemaps | none |
+| [`6.compare_to_screen.ipynb`](./6.compare_to_screen.ipynb) | Puts the validation plates next to the screen: the variance of the principal components split into position and heart status, the survival of the healthy against failing difference, and the placement of compounds on the screen platemaps | none |
 
 Run them in order; every notebook has a script version in [`nbconverted/`](./nbconverted/).
 The first one that needs the single-cell profiles reads the five `<plate>_sc_normalized.parquet` files (about 1.4 GB, on bandicoot at `~/mnt/bandicoot/CFReT_screening_data/validation_profiles/single_cell_profiles/`, or in the folder that `VALIDATION_PROFILE_DIR` names) and caches the median profile of every well in `well_medians.parquet`, which git ignores.
@@ -74,7 +74,7 @@ The figures are the five figures of the screen, for the validation plates.
 | [`figures/effect/well_pca_before_after_by_row.png`](./figures/effect/well_pca_before_after_by_row.png) | The wells in the principal components before and after the correction, with the displacement of the wells |
 | [`figures/effect/plate_layout_top_row_pc_before_after.png`](./figures/effect/plate_layout_top_row_pc_before_after.png) | The component that plate row explains most on the plate layout, before and after, for each replicate plate |
 
-[`figures/diagnostics/`](./figures/diagnostics/) has the figures of the diagnostics notebook, and [`results/`](./results/) has the tables.
+[`figures/diagnostics/`](./figures/diagnostics/) has the figures of the diagnostics notebook. [`results/`](./results/) has the tables that later notebooks read (the fit, the effect on the feature space, and the row prediction); the other numbers are printed in the notebooks.
 
 [`figures/quantify/`](./figures/quantify/) has the figures of the notebook that quantifies the position effect:
 
@@ -84,6 +84,7 @@ The figures are the five figures of the screen, for the validation plates.
 | [`position_vs_biology.png`](./figures/quantify/position_vs_biology.png) | The healthy against failing DMSO difference on each plate, with and without the correction, next to the difference that the tilt predicts between the healthy and the failing positions |
 | [`tilt_cross_cell_type.png`](./figures/quantify/tilt_cross_cell_type.png) | Whether a tilt fit on the DMSO of one cell type predicts the position pattern of the other cell type |
 | [`plate_layout_well_deviation.png`](./figures/quantify/plate_layout_well_deviation.png) | For each plate, the distance of every DMSO well from the mean profile of its cell type, before and after the held-out correction |
+| [`tilt_terms_and_uncertainty.png`](./figures/quantify/tilt_terms_and_uncertainty.png) | The size of each of the 14 row and column terms of the tilt, with its uncertainty from leaving out each plate |
 
 [`figures/compare_to_screen/`](./figures/compare_to_screen/) has the figures of `6.compare_to_screen.ipynb` (see Comparison with the screen below):
 
@@ -91,8 +92,6 @@ The figures are the five figures of the screen, for the validation plates.
 |---|---|
 | [`scree_position_and_heart_status.png`](./figures/compare_to_screen/scree_position_and_heart_status.png) | The variance of the first 20 principal components of the wells, with the part that plate position explains (red) and the part that heart status explains (blue), before and after the correction, for the screen (all wells, as in its own analysis) and the validation plates, on one y axis |
 | [`healthy_failing_survival.png`](./figures/compare_to_screen/healthy_failing_survival.png) | The length of the healthy against failing DMSO difference on every plate before and after the correction, and the share that survives for every screen platemap and for the validation plates |
-| [`tilt_terms_and_uncertainty.png`](./figures/compare_to_screen/tilt_terms_and_uncertainty.png) | The size of each of the 14 row and column terms of the validation tilt, with its uncertainty from leaving out each plate |
-| [`position_variance_before_vs_after.png`](./figures/compare_to_screen/position_variance_before_vs_after.png) | The position variation of every feature before and after the correction, for a tilt fit on all plates and for a tilt fit without the plate |
 | [`screen_compound_placement.png`](./figures/compare_to_screen/screen_compound_placement.png) | The correlation between compound number and position on the plate for every screen platemap |
 
 ## What we found
@@ -203,7 +202,7 @@ The rows are well determined and the columns are not.
 
 **What generalizes.**
 For a tilt fit on all plates, 36% of the features keep a position share above 0.2, and for a tilt fit without the plate, 28% do (55% before the correction; see the caveat in the measurement above).
-Many ER features, and some DNA and Golgi texture features, are as position-dependent after the correction as before it (`position_variance_before_vs_after.png`).
+Of the 1,335 features with a clear position effect (a share above 0.2 before the correction), 113 (8%) keep at least 80% of it after the held-out correction: 48 DNA, 29 without a channel, 13 ER, 12 Golgi, 5 multi-channel, 5 Mito, and 1 Actin feature.
 
 **Compound placement in the screen.**
 The number of the compound identifier rises with the position on the plate on platemaps 5, 7, 8, and 10 (Spearman correlation 0.49 to 0.71, p < 0.001), and does not on platemaps 1, 2, 3, 6, 9, and 11.
@@ -235,7 +234,7 @@ So compounds were not placed independently of position on some platemaps, which 
 ├── 6.compare_to_screen.ipynb             Compare the validation plates with the screen
 ├── nbconverted/                          Script version of each notebook
 ├── position_correction_fit.npz           The tilt map and amplitude (committed; step 4b reads it)
-├── results/                              Tables
+├── results/                              Tables that later notebooks read
 ├── figures/                              Figures (diagnostics/, fit/, validation/, effect/, quantify/, compare_to_screen/)
 └── well_medians.parquet                  Median profile of every well (git ignores this cache)
 ```

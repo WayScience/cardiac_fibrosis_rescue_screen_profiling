@@ -3,7 +3,7 @@
 
 # # Quantify the position effect
 # 
-# This notebook measures how large the position effect is on the validation plates and how much of it the correction removes, with four measurements.
+# This notebook measures how large the position effect is on the validation plates and how much of it the correction removes, with five measurements.
 # It changes no data: it reads the well medians that `1.fit_position_correction.ipynb` cached and the committed fit.
 # 
 # The DMSO wells are the backbone of the measurements, because they sit at the same positions on all five plates: 18 healthy and 18 failing positions, in blocks of columns that cover all six rows (failing in columns 2, 4, and 10, healthy in 3, 9, and 11).
@@ -14,13 +14,13 @@
 # 2. **Position against biology.** The size of the healthy against failing DMSO difference on each plate, with and without the correction, next to the difference that the tilt predicts between the healthy and the failing positions.
 # 3. **Does the tilt carry over between cell types?** The correction assumes position moves healthy and failing cells equally. Both cell types sit at many positions, so we fit the tilt on the failing DMSO only and check whether it predicts the position pattern of the healthy DMSO, and the other way round.
 # 4. **Per plate.** The distance of every DMSO well from the mean of its cell type, on the layout of each plate, before and after the held-out correction.
+# 5. **How well the tilt terms are determined.** The size of each row and column term of the tilt, with its uncertainty from leaving each plate out in turn.
 # 
 # Effect sizes are the length of a difference of profiles over all features, in standard deviations of a single cell.
 # 
 # **Output**
 # 
-# - `results/position_variance_by_feature.csv`, `position_variance_summary.csv`, `position_vs_biology.csv`, `position_vs_biology_plate_average.csv`, `tilt_cross_cell_type.csv`, `well_deviation_from_class_mean.csv`, and `well_deviation_by_row.csv`
-# - `figures/quantify/`: one figure for each measurement
+# - `figures/quantify/`: one figure for each measurement. The tables behind them are printed in the notebook.
 
 # ## Import libraries
 
@@ -46,8 +46,6 @@ import validation_position_utils as vpu
 
 figure_dir = pathlib.Path("figures") / "quantify"
 figure_dir.mkdir(parents=True, exist_ok=True)
-results_dir = pathlib.Path("results")
-results_dir.mkdir(exist_ok=True)
 
 fit_path = pathlib.Path("position_correction_fit.npz")
 well_medians_cache = pathlib.Path("well_medians.parquet")
@@ -97,7 +95,6 @@ shares = pd.concat(
     [shares, pd.DataFrame([vpu.parse_feature_family(name) for name in shares["feature"]])],
     axis=1,
 )
-shares.to_csv(results_dir / "position_variance_by_feature.csv", index=False)
 valid = shares.dropna(subset=["raw", "in_sample", "held_out"])
 
 has_effect = valid["raw"] > 0.2
@@ -116,7 +113,6 @@ summary = pd.DataFrame(
     }
 )
 summary["features"] = len(valid)
-summary.to_csv(results_dir / "position_variance_summary.csv", index=False)
 print(summary.round(3).to_string(index=False))
 print(
     f"\nFeatures with a clear position effect (share above 0.2): {int(has_effect.sum())}. "
@@ -181,32 +177,35 @@ position_vs_biology = pd.DataFrame(records)
 position_vs_biology["share_kept"] = position_vs_biology["corrected"] / position_vs_biology["raw"]
 tilt_healthy_vs_failing = float(np.linalg.norm(tilt_at_wells[is_healthy].mean(0) - tilt_at_wells[is_failing].mean(0)))
 position_vs_biology["tilt_healthy_vs_failing"] = tilt_healthy_vs_failing
-position_vs_biology.to_csv(results_dir / "position_vs_biology.csv", index=False)
 print(position_vs_biology.round(2).to_string(index=False))
 
 # the same difference for the profiles averaged over the five plates (less noise than a single plate)
 pooled_raw = np.linalg.norm(raw[is_healthy].mean(0) - raw[is_failing].mean(0))
 pooled_corrected = np.linalg.norm(corrected[is_healthy].mean(0) - corrected[is_failing].mean(0))
-pd.DataFrame({"raw": [pooled_raw], "corrected": [pooled_corrected]}).to_csv(
-    results_dir / "position_vs_biology_plate_average.csv", index=False
-)
 print(f"Plate-averaged healthy minus failing difference: {pooled_raw:.1f} before and {pooled_corrected:.1f} after the correction")
 
 
 # In[7]:
 
 
-fig, ax = plt.subplots(figsize=(8, 4.6))
+fig, ax = plt.subplots(figsize=(8, 5.2))
 x = np.arange(len(position_vs_biology))
 ax.bar(x - 0.2, position_vs_biology["raw"], 0.4, color=colors["raw"], label="Uncorrected")
 ax.bar(x + 0.2, position_vs_biology["corrected"], 0.4, color=colors["held_out"], label="Corrected")
-ax.axhline(tilt_healthy_vs_failing, color="black", ls="--", label=f"Healthy against failing positions in the tilt ({tilt_healthy_vs_failing:.1f})")
 ax.set_xticks(x)
 ax.set_xticklabels([f"Plate {i + 1}" for i in x])
 ax.set_ylabel("Length of the healthy minus failing DMSO difference")
 ax.set_title("Healthy against failing DMSO, with and without the correction")
-ax.legend(fontsize=9)
-fig.tight_layout()
+# the tilt has no healthy-against-failing component, so the two bars of a plate are the same
+ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, fontsize=9, frameon=False)
+fig.text(
+    0.5,
+    0.01,
+    f"The length of the healthy against failing positions in the tilt is {tilt_healthy_vs_failing:.1f}, so the correction leaves this difference unchanged.",
+    ha="center",
+    fontsize=8,
+)
+fig.tight_layout(rect=(0, 0.04, 1, 1))
 fig.savefig(figure_dir / "position_vs_biology.png", dpi=150)
 plt.show()
 
@@ -255,7 +254,6 @@ for source, target in ((FAILING, HEALTHY), (HEALTHY, FAILING)):
     ceiling, _ = cosine_and_slope(pattern_a, pattern_b)
     records.append({"fit_on": source, "predicts": target, "cosine": cosine, "slope": slope, "ceiling_cosine": ceiling, "n_positions": len(positions)})
 cross = pd.DataFrame(records)
-cross.to_csv(results_dir / "tilt_cross_cell_type.csv", index=False)
 print(cross.round(2).to_string(index=False))
 
 
@@ -268,11 +266,11 @@ x = np.arange(len(cross))
 ax.bar(x - 0.2, cross["cosine"], 0.4, color=colors["held_out"], label="Cosine of the prediction")
 ax.bar(x + 0.2, cross["ceiling_cosine"], 0.4, color="#bdbdbd", label="Ceiling (two halves of the plates)")
 ax.set_xticks(x)
-ax.set_xticklabels([f"Fit on {a}\\npredicts {b}" for a, b in zip(cross["fit_on"], cross["predicts"])])
-ax.set_ylim(0, 1.05)
+ax.set_xticklabels([f"Fit on {a}\npredicts {b}" for a, b in zip(cross["fit_on"], cross["predicts"])])
+ax.set_ylim(0, 1.2)
 ax.set_ylabel("Cosine between predicted and observed position pattern")
 ax.set_title("Does the tilt carry over between cell types?")
-ax.legend(fontsize=9, loc="lower right")
+ax.legend(fontsize=9, loc="upper center", ncol=2)
 ax = axes[1]
 source_wells = dmso[dmso["cell_type"] == FAILING]
 tilt_fit = vpu.fit_compound_adjusted_tilt(source_wells, features, min_cells, include_controls=True)
@@ -322,11 +320,9 @@ deviation["column"] = deviation["well"].str[1:].astype(int)
 deviation["raw"] = distance_from_class_mean(raw)
 deviation["held_out"] = distance_from_class_mean(held_out_profiles)
 deviation = deviation[is_dmso]
-deviation.to_csv(results_dir / "well_deviation_from_class_mean.csv", index=False)
 
 by_row = deviation.groupby("row")[["raw", "held_out"]].mean()
 by_row["share_kept"] = by_row["held_out"] / by_row["raw"]
-by_row.to_csv(results_dir / "well_deviation_by_row.csv")
 print("Mean distance from the mean of the cell type, by plate row")
 print(by_row.round(2).to_string())
 
@@ -372,5 +368,73 @@ for j, plate in enumerate(plates):
             colorbar.set_label("Change" if i == 2 else "Distance", fontsize=8)
 fig.suptitle("Distance of each DMSO well from the mean profile of its cell type, before and after the correction")
 fig.savefig(figure_dir / "plate_layout_well_deviation.png", dpi=150, bbox_inches="tight")
+plt.show()
+
+
+# ## 5. How well the tilt terms are determined
+# 
+# **The model.** The correction subtracts, from every feature, a position effect that is the sum of one effect for the row of the well and one effect for its column (the tilt).
+# The model of a feature that the fit solves has one effect for each group (a compound, or the DMSO of one cell type), five row effects (rows C to G against row B), and ten column effects, with a tiny ridge penalty instead of a reference column (they are reported against column 2).
+# The groups sit in blocks of columns, so three column offsets (failing, healthy, compound columns) cannot be told from the group effects; the ridge sets them to zero.
+# It is fit on the wells of the 15 compounds and of the two kinds of DMSO, separately for each of the 2,453 features, with the replicate plates averaged.
+# The group effects are there so that what a compound or a cell type does is not counted as position.
+# The DMSO of each cell type is at 18 positions on every plate, three in each row.
+# A compound is at 8 positions on a single plate (columns 5 to 8, in all six rows), so a compound adds position information only through the other compounds and the DMSO wells that share its rows and columns.
+# 
+# **How well each term is determined.** We refit the tilt five times, each time without one plate, and measure how much every row and column term changes (the jackknife standard error).
+# A term whose estimate changes as much as its own size is not determined by these plates.
+
+# In[12]:
+
+
+n_row_terms = pcu.N_ROW_TERMS
+
+
+def position_terms(fit):
+    """Row effects against row B and column effects against column 2, one vector over features per term."""
+    coefficients = fit["coef"]
+    rows = coefficients[1:n_row_terms] - coefficients[0]
+    cols = coefficients[n_row_terms:]
+    return np.vstack([rows, cols])
+
+
+term_names = [f"Row {row} vs B" for row in "CDEFG"] + [f"Column {c} vs 2" for c in range(3, 12)]
+full_terms = position_terms(vpu.fit_compound_adjusted_tilt(wells, features, min_cells, include_controls=True))
+plates = sorted(wells["plate"].unique())
+leave_one_out = np.stack(
+    [
+        position_terms(
+            vpu.fit_compound_adjusted_tilt(wells[wells["plate"] != plate], features, min_cells, include_controls=True)
+        )
+        for plate in plates
+    ]
+)
+n = len(plates)
+jackknife_se = np.sqrt((n - 1) / n * ((leave_one_out - leave_one_out.mean(axis=0)) ** 2).sum(axis=0))
+term_table = pd.DataFrame(
+    {
+        "term": term_names,
+        "size": np.linalg.norm(full_terms, axis=1),
+        "uncertainty": np.linalg.norm(jackknife_se, axis=1),
+    }
+)
+term_table["size_over_uncertainty"] = term_table["size"] / term_table["uncertainty"]
+term_table.round(2)
+
+
+# In[13]:
+
+
+fig, ax = plt.subplots(figsize=(8, 6))
+y = np.arange(len(term_table))[::-1]
+term_colors = ["#6a3d9a" if name.startswith("Row") else "#ff7f00" for name in term_table["term"]]
+ax.barh(y, term_table["size"], color=term_colors, alpha=0.85)
+ax.errorbar(term_table["size"], y, xerr=term_table["uncertainty"], fmt="none", ecolor="black", capsize=3, lw=1.2)
+ax.set_yticks(y)
+ax.set_yticklabels(term_table["term"])
+ax.set_xlabel("Size of the term (length over features), with its uncertainty (bar) from leaving out each plate")
+ax.set_title("The 14 position terms of the tilt on the validation plates (purple: rows, orange: columns)", fontsize=10)
+fig.tight_layout()
+fig.savefig(figure_dir / "tilt_terms_and_uncertainty.png", dpi=150, bbox_inches="tight")
 plt.show()
 
