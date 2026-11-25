@@ -70,7 +70,7 @@ min_cells = 50  # minimum cells for a well to be used
 
 
 well_medians, features = vpu.load_or_build_well_medians(
-    well_medians_cache, ".", platemap_dir="../../metadata/platemaps"
+    well_medians_cache, ".", platemap_dir="../../metadata/platemaps", rebuild=False
 )
 # The features are chosen on all plates, so the held-out plate must not decide which ones stay. Building the
 # cache drops every feature with a missing value in any well; this checks the record of what it dropped (an

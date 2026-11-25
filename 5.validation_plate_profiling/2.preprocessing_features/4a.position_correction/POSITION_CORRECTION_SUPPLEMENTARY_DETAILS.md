@@ -159,7 +159,7 @@ The tilt was fit on these wells.*
 ## 8. The correction does not change the non-failing versus failing contrast
 We measure the contrast as the distance between the mean non-failing DMSO profile and the mean failing DMSO profile of a plate: the Euclidean length of the difference of the two over all features, in standard deviations of a single cell.
 This distance is 12.8 to 14.5 on every plate before the correction and the same after it (the share that survives is 1.00), and the tilt itself predicts no difference between the positions of the non-failing and the failing wells (it differs by 0; the correction changes the difference of a plate by at most 4e-09; Figure 12).
-This is by design: the rows are balanced between the two cell types, and the fit does not split the column-block offsets between the group and the column effects.
+This is an observed result on these plates, which the layout makes likely and does not guarantee: the rows are balanced between the two cell types, so the row effects cancel, and the fit does not split the column-block offsets between the group and the column effects. The two cell types are in different columns, though, so the mean offsets that they receive are not equal by construction: they are equal here (the tilt predicts a difference of 0, as measured above), and uneven filtering of wells could change that.
 The balance has to survive the filter on the number of cells: if a non-failing well were dropped from one row without a matching failing well, the non-failing mean would shift by the offset of that row and the ratio would move away from 1 even for a correct fit.
 Here no DMSO well is dropped (15 wells of each kind in every row, `1.fit_position_correction.ipynb`).
 The difference that survives is the one left after the fitted tilt is subtracted; it is not necessarily all biology, because the fit leaves the offsets of the three blocks of columns in the group effects.
@@ -178,7 +178,7 @@ Right: the share of the distance that survives the correction, which is the corr
 The failing DMSO is in columns 2, 4, and 10 and the non-failing DMSO in columns 3, 9, and 11, so a tilt fit on one cell type has no observation for the columns of the other, and what it predicts for the other cell type varies only by row.
 We therefore compared the row patterns (six rows): the tilt fit on the failing DMSO predicts the row pattern of the non-failing DMSO, and the reverse (Figure 14).
 The cosine between the predicted and the observed row pattern is 0.92 in both directions, while the row patterns of two halves of the plates of the same cell type agree at 0.90 and 0.92 (a noise reference, not an upper bound for a prediction).
-The prediction for the non-failing wells has about the right size (slope 1.09), and the prediction for the failing wells has 0.78 of it.
+The slope is that of the observed pattern on the predicted one. The tilt fit on the failing DMSO predicts the non-failing wells at about the right size (slope 1.09), and the tilt fit on the non-failing DMSO predicts the failing wells too large: the observed pattern is 0.78 times the prediction, so the prediction is 1.28 times the observed one.
 So the row effect moves the two cell types in nearly the same way.
 **This layout cannot test whether the column effects carry over between cell types**, so the column terms of one shared tilt are not validated by this test.
 

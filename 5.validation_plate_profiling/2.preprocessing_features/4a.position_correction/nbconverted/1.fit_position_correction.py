@@ -200,9 +200,13 @@ kind = np.where(
 offset_size = pd.Series(np.sqrt((offsets**2).mean(axis=1)), name="mean offset (RMS)")
 print(offset_size.groupby(kind).agg(["mean", "size"]).round(3))
 
-# the contrast is left alone only if the filter keeps the same number of wells of each kind in every row
-dmso_by_row = pd.crosstab(kind[is_dmso.to_numpy()], wells.loc[is_dmso, "row"].map(dict(enumerate(pcu.ROWS))))
-print("DMSO wells of each kind by row after the cell filter:")
+# the contrast is left alone only if the filter keeps the same number of wells of each kind in every row of every plate
+dmso = wells.loc[is_dmso].assign(kind=kind[is_dmso.to_numpy()], row_name=wells.loc[is_dmso, "row"].map(dict(enumerate(pcu.ROWS))))
+dmso_by_plate_and_row = pd.crosstab([dmso["plate"], dmso["kind"]], dmso["row_name"])
+dmso_by_row = pd.crosstab(dmso["kind"], dmso["row_name"])
+print("DMSO wells of each kind by row after the cell filter, for each plate:")
+print(dmso_by_plate_and_row.to_string())
+print("\nAll plates together:")
 print(dmso_by_row.to_string())
 
 contrast = vpu.control_contrast(wells, features).merge(
@@ -213,8 +217,11 @@ contrast = vpu.control_contrast(wells, features).merge(
 contrast["ratio"] = contrast["norm_corrected"] / contrast["norm_raw"]
 contrast.round(2).to_csv(results_dir / "control_contrast.csv", index=False)
 print(contrast.round(2).to_string(index=False))
+defined = contrast["ratio"].notna()
+if not defined.all():
+    print("Plates without a contrast (no well of one kind after the cell filter):", contrast.loc[~defined, "plate"].tolist())
 print(
-    f"\nNon-failing minus failing DMSO contrast over {len(contrast)} plates: "
+    f"\nNon-failing minus failing DMSO contrast over {int(defined.sum())} of {len(contrast)} plates: "
     f"median norm ratio (corrected / raw) {contrast['ratio'].median():.2f}"
 )
 

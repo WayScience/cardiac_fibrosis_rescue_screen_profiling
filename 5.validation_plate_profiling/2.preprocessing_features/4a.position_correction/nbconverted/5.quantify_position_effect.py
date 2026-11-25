@@ -65,7 +65,7 @@ colors = {"raw": "#d62728", "in_sample": "#7f7f7f", "held_out": "#1f77b4"}
 
 fit = pcu.load_fit(fit_path)
 well_medians, features = vpu.load_or_build_well_medians(
-    well_medians_cache, ".", platemap_dir="../../metadata/platemaps"
+    well_medians_cache, ".", platemap_dir="../../metadata/platemaps", rebuild=False
 )
 features = [feature for feature in fit["features"] if feature in well_medians.columns]
 feature_index = [list(fit["features"]).index(feature) for feature in features]

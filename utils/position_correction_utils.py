@@ -455,10 +455,12 @@ def shrink_amplitude(amplitudes: dict[int, tuple[float, float]], target: int) ->
     ses = np.array([v[1] for v in others])
     tau2 = max(0.0, amps.var(ddof=1) - np.mean(ses**2))
     variances = ses**2 + tau2
-    # if the amplitudes agree exactly and have no standard error, the weights would be
-    # infinite: use the plain average then
-    weights = 1 / variances if np.all(variances > 0) else np.ones_like(variances)
-    mean = np.average(amps, weights=weights)
+    if np.all(variances > 0):
+        mean = np.average(amps, weights=1 / variances)
+    else:
+        # an estimate without any variance is exact: the weights would be infinite, so the
+        # average is over those estimates only (the plain average if they all have none)
+        mean = float(np.mean(amps[variances == 0]))
     own, own_se = amplitudes[target]
     weight = tau2 / (tau2 + own_se**2) if tau2 + own_se**2 > 0 else 0.0
     return float(mean + weight * (own - mean))
