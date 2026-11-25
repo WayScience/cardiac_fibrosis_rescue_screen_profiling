@@ -132,8 +132,8 @@ def _plate_well_medians(path: pathlib.Path, plate: str, platemap: int) -> pd.Dat
 
 
 def build_well_medians(
-    plate_table: pd.DataFrame, n_jobs: int = 1
-) -> tuple[pd.DataFrame, list[str]]:
+    plate_table: pd.DataFrame, n_jobs: int = 1, return_dropped: bool = False
+) -> tuple[pd.DataFrame, list[str]] | tuple[pd.DataFrame, list[str], dict[str, list[str]]]:
     """Summarize every well of every plate as the median profile of its cells.
 
     Reads each plate listed in ``plate_table`` with ``_plate_well_medians`` and stacks
@@ -149,13 +149,17 @@ def build_well_medians(
         Number of plates to read in parallel, by default 1.
         The default reads one plate at a time.
         Other values use joblib (``-1`` uses all cores).
+    return_dropped : bool, optional
+        Also return the dropped features, by default False.
 
     Returns
     -------
-    tuple[pd.DataFrame, list[str]]
+    tuple[pd.DataFrame, list[str]] | tuple[pd.DataFrame, list[str], dict[str, list[str]]]
         The well table, with one row per plate and well and the columns ``plate``,
         ``platemap``, ``well``, ``treatment``, ``cell_type``, ``n`` (the number of cells
         in the well), and the retained features, and the list of retained feature names.
+        With ``return_dropped``, also a dictionary that maps every dropped feature to the
+        plates that have a well with a missing value of it.
     """
     jobs = list(plate_table[["path", "plate", "platemap"]].itertuples(index=False))
     if n_jobs == 1:
@@ -169,8 +173,15 @@ def build_well_medians(
     well_medians = pd.concat(tables, ignore_index=True)
     meta = ["plate", "platemap", "well", "treatment", "cell_type", "n"]
     features = [c for c in well_medians.columns if c not in meta]
-    features = [c for c in features if not well_medians[c].isna().any()]
-    return well_medians[meta + features], features
+    retained = [c for c in features if not well_medians[c].isna().any()]
+    if not return_dropped:
+        return well_medians[meta + retained], retained
+    dropped = {
+        c: sorted(well_medians.loc[well_medians[c].isna(), "plate"].unique())
+        for c in features
+        if c not in retained
+    }
+    return well_medians[meta + retained], retained, dropped
 
 
 def compound_table(
@@ -443,7 +454,13 @@ def shrink_amplitude(amplitudes: dict[int, tuple[float, float]], target: int) ->
     amps = np.array([v[0] for v in others])
     ses = np.array([v[1] for v in others])
     tau2 = max(0.0, amps.var(ddof=1) - np.mean(ses**2))
-    mean = np.average(amps, weights=1 / (ses**2 + tau2))
+    variances = ses**2 + tau2
+    if np.all(variances > 0):
+        mean = np.average(amps, weights=1 / variances)
+    else:
+        # an estimate without any variance is exact: the weights would be infinite, so the
+        # average is over those estimates only (the plain average if they all have none)
+        mean = float(np.mean(amps[variances == 0]))
     own, own_se = amplitudes[target]
     weight = tau2 / (tau2 + own_se**2) if tau2 + own_se**2 > 0 else 0.0
     return float(mean + weight * (own - mean))

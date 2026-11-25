@@ -24,4 +24,9 @@ echo "QC completed for all plates"
 uv run --locked python nbconverted/2.single_cell_processing.py
 uv run --locked python nbconverted/3.bulk_processing.py
 
+# correct the plate-position effect of the single cells and aggregate the corrected cells to bulk profiles
+# (the fit is in 4a.position_correction/ and this script does not rerun it)
+uv run --locked python nbconverted/4b.apply_position_correction.py
+uv run --locked python nbconverted/5.bulk_position_corrected.py
+
 echo "Preprocessing complete."

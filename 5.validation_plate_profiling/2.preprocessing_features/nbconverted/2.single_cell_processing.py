@@ -3,7 +3,7 @@
 
 # # Process single cell profiles
 # 
-# NOTE: We are normalizing the plates for all samples as we only have three wells associated with the healthy controls, which is insufficient for normalization.
+# NOTE: We normalize the single cells with all cells on the plate, and not with the negative controls, because the logistic regression models of the hit calling are trained on the control cells and need them to stay unchanged by the normalization.
 
 # ## Import libraries
 
