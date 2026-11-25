@@ -143,6 +143,7 @@ Differences from the screen:
   [Test 9](./POSITION_CORRECTION_SUPPLEMENTARY_DETAILS.md#9-the-row-effect-of-one-cell-type-predicts-the-row-pattern-of-the-other) tests the last part for the rows, where it is approximately true between the two cell types; this layout cannot test it for the columns.
 - The five replicate plates share the DMSO layout, so they reduce noise, but the compounds are on one plate each.
   The compound effects are fit, not replicated, and the 8 positions of a compound (columns 5 to 8, in all six rows) are what separate its effect from position.
+- A compound sits in the wells of one of three fixed sets (slots A, B, and C) that are the same on every plate, so an effect of the slot cannot be told from the effect of the compound, and this tilt does not remove it. The compounds of slot A score lower than those of the other two on every plate: see [`../4c.slot_a_adjustment/`](../4c.slot_a_adjustment/README.md).
 - The groups sit in blocks of columns (failing DMSO in columns 2, 4, and 10, non-failing DMSO in 3, 9, and 11, compounds in 5 to 8), so a column effect is confounded with the cell type and the compounds, and only the differences between columns inside a block are determined.
   The column terms of the tilt are therefore not reliable, and the row terms carry the correction.
 - The held-out test is held out by plate, so it tells how the correction works for a new plate on this layout, not for a new layout.

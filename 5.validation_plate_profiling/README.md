@@ -40,6 +40,7 @@ What the design means for the analysis:
 - **Rows are not confounded with cell type.** Both kinds of DMSO have three wells in every row, so a row effect can be estimated from the controls and does not look like a difference between non-failing and failing cells.
 - **Identical layout on every plate.** The plates differ in their compounds only, so we can fit one position effect (row and column) to all plates and give each plate its own strength.
 - **Columns are not covered by controls.** The compounds sit in columns 5 to 8, which have no DMSO, so the column effects of these columns come from the compound wells and are only partly identifiable. [`2.preprocessing_features/4a.position_correction`](./2.preprocessing_features/4a.position_correction/) explains how the correction handles this and how much of the position effect it removes.
+- **Slots.** Each compound occupies the wells of one of three fixed sets of eight compound wells (slots A, B, and C) that are the same on every plate, and the compounds were dispensed into the slots at random. The compounds of slot A score lower than those of the other two on every plate, and the position correction cannot remove this: see [`2.preprocessing_features/4c.slot_a_adjustment`](./2.preprocessing_features/4c.slot_a_adjustment/README.md).
 
 The plate maps enter the workflow in step 2 (the profiles get the treatment, cell type, and heart as metadata), in the position correction (the well row and column, and the group of each well), and in the [hit calling](https://github.com/WayScience/cardiac_fibrosis_rescue_screen_hit_calling) of the compounds (module `4.validation`).
 
@@ -65,7 +66,7 @@ The blocklist in [`2.preprocessing_features/blocklist_features.txt`](./2.preproc
 | --- | --- | --- |
 | 0 | [`0.illumination_correction`](./0.illumination_correction/) | Create the LoadData files and correct illumination with CellProfiler |
 | 1 | [`1.cellprofiler_processing`](./1.cellprofiler_processing/) | Segment cells and extract morphology features with CellProfiler |
-| 2 | [`2.preprocessing_features`](./2.preprocessing_features/) | Convert to parquet, run single-cell QC, process single cells, correct the plate-position effect, and aggregate to bulk profiles |
+| 2 | [`2.preprocessing_features`](./2.preprocessing_features/) | Convert to parquet, run single-cell QC, process single cells, correct the plate-position effect, and aggregate to bulk profiles; the optional step 4c writes separate profiles with the slot A adjustment |
 
 [`metadata/`](./metadata/) holds the validation plate map and its visualization.
 
