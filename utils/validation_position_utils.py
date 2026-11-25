@@ -22,8 +22,11 @@ format (``coef``, ``center``, ``features`` and ``amplitudes``), so
 ``position_correction_utils.save_fit``, ``load_fit`` and ``correct_cells`` work with it.
 """
 
+import datetime
 import json
+import os
 import pathlib
+import warnings
 from collections.abc import Callable, Iterable, Sequence
 
 import numpy as np
@@ -170,19 +173,26 @@ def check_feature_selection_is_plate_independent(cache_path: str | pathlib.Path)
         )
 
 
+REBUILD_WELL_MEDIANS_VARIABLE = "REBUILD_WELL_MEDIANS"
+
+
 def load_or_build_well_medians(
     cache_path: str | pathlib.Path,
     profile_dir: str | pathlib.Path,
     n_jobs: int = 1,
     platemap_dir: str | pathlib.Path | None = None,
+    rebuild: bool | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Load the median profile of every well, or build it from the single-cell profiles.
 
     Reading the five plates takes a few minutes, so the table is cached in a parquet file.
-    When the cache is missing, the function summarizes every well of every plate as the
-    median profile of its cells (``position_correction_utils.build_well_medians``, which
-    drops the features with a missing value in any well) and saves the cache.
-    Delete the cache when the single-cell profiles change.
+    When the cache is missing, or when ``rebuild`` is true, the function summarizes every
+    well of every plate as the median profile of its cells
+    (``position_correction_utils.build_well_medians``, which drops the features with a missing
+    value in any well) and saves the cache.
+    The cache is not checked against the profiles. When it is used, the function warns with the
+    date on which the file was written, so that a stale cache is noticed: rebuild it when the
+    single-cell profiles change.
 
     Parameters
     ----------
@@ -190,12 +200,15 @@ def load_or_build_well_medians(
         Parquet file of the well medians.
     profile_dir : str | pathlib.Path
         Folder with the ``<plate>_sc_normalized.parquet`` files, only read when the cache
-        is missing.
+        is built.
     n_jobs : int, optional
         Number of plates to read in parallel, by default 1.
     platemap_dir : str | pathlib.Path | None, optional
         Folder with the plate maps, which give the plate numbers (see
-        ``discover_validation_profiles``). Only used when the cache is missing.
+        ``discover_validation_profiles``). Only used when the cache is built.
+    rebuild : bool | None, optional
+        Build the cache again even if the file exists. By default (None) the environment
+        variable ``REBUILD_WELL_MEDIANS`` decides: ``1``, ``true``, or ``yes`` rebuilds.
 
     Returns
     -------
@@ -207,11 +220,21 @@ def load_or_build_well_medians(
     Raises
     ------
     FileNotFoundError
-        If the cache is missing and ``profile_dir`` has no profile files.
+        If the cache is built and ``profile_dir`` has no profile files.
     """
     cache_path = pathlib.Path(cache_path)
     meta_columns = ["plate", "platemap", "well", "treatment", "cell_type", "n"]
-    if cache_path.exists():
+    if rebuild is None:
+        rebuild = os.environ.get(REBUILD_WELL_MEDIANS_VARIABLE, "").strip().lower() in ("1", "true", "yes")
+    if cache_path.exists() and not rebuild:
+        written = datetime.datetime.fromtimestamp(cache_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        warnings.warn(
+            f"Using the cached well medians in {cache_path}, which were written on {written}. "
+            "They are not checked against the single-cell profiles. "
+            f"Set {REBUILD_WELL_MEDIANS_VARIABLE}=1 (or pass rebuild=True) to build them again from the profiles.",
+            UserWarning,
+            stacklevel=2,
+        )
         well_medians = pd.read_parquet(cache_path)
         return well_medians, [c for c in well_medians.columns if c not in meta_columns]
     plate_table = discover_validation_profiles(

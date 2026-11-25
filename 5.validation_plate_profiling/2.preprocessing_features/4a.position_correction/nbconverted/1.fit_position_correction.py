@@ -10,7 +10,7 @@
 # It does not change any existing profiles.
 # Applying the correction is a separate step: `../4b.apply_position_correction.ipynb` reads the saved fit (`position_correction_fit.npz`).
 # Rerun this notebook whenever the normalized profiles change.
-# Delete `well_medians.parquet` first so that the notebook rebuilds the well medians from the new profiles instead of reading the cache.
+# Set `REBUILD_WELL_MEDIANS=1` so that the notebook builds the well medians again from the new profiles instead of reading the cache (when it reads the cache, it warns with the date on which the file was written).
 # 
 # **Layout.** Every plate has 60 wells (rows B to G, columns 2 to 11), in blocks of columns: the failing DMSO (18 wells) in columns 2, 4, and 10 and the non-failing DMSO (18 wells) in columns 3, 9, and 11, in all six rows at the same positions on all five plates, and 24 compound wells in columns 5 to 8, in all six rows. Each plate has three compounds with eight wells each, in positions that differ between plates (15 compounds in all, on failing cells).
 # 
@@ -62,7 +62,7 @@ import validation_position_utils as vpu
 
 
 # folder with the <plate>_sc_normalized.parquet files (only read when the cache is missing:
-# an existing well_medians.parquet is used whatever this folder is, so delete it when the profiles change)
+# an existing well_medians.parquet is used whatever this folder is, so set REBUILD_WELL_MEDIANS=1 when the profiles change)
 profile_dir = pathlib.Path(
     os.environ.get(
         "VALIDATION_PROFILE_DIR",

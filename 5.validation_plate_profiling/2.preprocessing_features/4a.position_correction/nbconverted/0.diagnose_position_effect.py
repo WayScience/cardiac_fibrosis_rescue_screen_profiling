@@ -61,7 +61,7 @@ import validation_position_utils as vpu
 
 
 # folder with the <plate>_sc_normalized.parquet files (only read when the well cache is missing:
-# an existing well_medians.parquet is used whatever this folder is, so delete it when the profiles change)
+# an existing well_medians.parquet is used whatever this folder is, so set REBUILD_WELL_MEDIANS=1 when the profiles change)
 profile_dir = pathlib.Path(
     os.environ.get(
         "VALIDATION_PROFILE_DIR",

@@ -217,7 +217,21 @@ def well_score_table(
 
 
 def r_squared(values: np.ndarray, predictors: np.ndarray) -> float:
-    """R squared of a linear model of ``values`` with an intercept and the ``predictors`` columns."""
+    """R squared of a linear model of ``values`` with an intercept and the ``predictors`` columns.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        The response, one value for every well, with shape ``(n_wells,)``.
+    predictors : np.ndarray
+        The predictors, one column for each, with shape ``(n_wells, n_predictors)``. The intercept is added.
+
+    Returns
+    -------
+    float
+        The share of the variance of ``values`` that the model explains, or 0 when ``values``
+        has no variance.
+    """
     design = np.column_stack([np.ones(len(values)), predictors])
     coefficients = np.linalg.lstsq(design, values, rcond=None)[0]
     residual = values - design @ coefficients
@@ -234,6 +248,19 @@ def adjusted_r_squared(scores: np.ndarray, design: np.ndarray) -> np.ndarray:
     ``position_correction_utils.design_matrix`` has an indicator for every position, also
     for the positions that the wells do not occupy. The result is NaN for every column
     when there are no more wells than the rank, and for a column without variation.
+
+    Parameters
+    ----------
+    scores : np.ndarray
+        Scores of the wells, with shape ``(n_wells, n_columns)`` (for example principal
+        component scores).
+    design : np.ndarray
+        Design matrix of the wells, with shape ``(n_wells, n_terms)`` and its own intercept.
+
+    Returns
+    -------
+    np.ndarray
+        The adjusted R squared of every column of ``scores``, with shape ``(n_columns,)``.
     """
     n_wells = design.shape[0]
     coefficients, _, rank, _ = np.linalg.lstsq(design, scores, rcond=None)
@@ -255,8 +282,28 @@ def pc_variance_table(
 ) -> tuple[pd.DataFrame, PCA, np.ndarray]:
     """Fraction of each principal component that the ``factors`` of ``wells`` explain.
 
-    Returns the table (one row per component), the fitted PCA, and the scores of the wells.
     A factor with a single level is skipped.
+
+    Parameters
+    ----------
+    wells : pd.DataFrame
+        The wells, with the columns that the ``factors`` name, in the order of ``profiles``.
+    profiles : np.ndarray
+        The profile of every well, with shape ``(n_wells, n_features)``.
+    label : str
+        Name of the analysis, written to the ``analysis`` column of the table.
+    n_components : int, optional
+        Number of principal components, by default 10.
+    random_state : int, optional
+        Seed of the PCA, by default 0.
+    factors : Sequence[str], optional
+        Columns of ``wells`` to explain the components with, by default ``("row", "col", "plate", "treatment")``.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, PCA, np.ndarray]
+        The table (one row per component, with the variance of the component and the fraction
+        that each factor explains), the fitted PCA, and the scores of the wells.
     """
     pca = fit_pca(profiles, n_components, random_state)
     scores = pca.transform(profiles)
@@ -279,7 +326,25 @@ def pc_variance_table(
 def explained_by_position_and_cells(
     rows: np.ndarray, log_cells: np.ndarray, scores: np.ndarray, label: str
 ) -> pd.DataFrame:
-    """R squared of each component for plate row, log cells per well, and both."""
+    """R squared of each component for plate row, log cells per well, and both.
+
+    Parameters
+    ----------
+    rows : np.ndarray
+        Plate row of every well (the row labels, one per well).
+    log_cells : np.ndarray
+        Logarithm of the number of cells of every well.
+    scores : np.ndarray
+        Principal component scores of the wells, with shape ``(n_wells, n_components)``.
+    label : str
+        Name of the analysis, written to the ``analysis`` column of the table.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per component, with the R squared for the row (``row``), the log number of
+        cells (``log_cells``), and both (``row_and_log_cells``).
+    """
     present = np.unique(rows)
     row_terms = (rows[:, None] == present[None, 1:]).astype(float)
     records = []
@@ -318,6 +383,26 @@ def partition_variance(
     is a sum of column indicators and a component that follows only the non-failing columns
     scores 1 on both. The row alone (``row_*``) is not confounded with the status there,
     because every row has the same number of wells of each kind.
+
+    Parameters
+    ----------
+    medians : pd.DataFrame
+        Well medians, with the columns ``well``, ``plate``, ``platemap``, ``cell_type`` and the features.
+    fit : dict
+        Tilt map and plate amplitudes (``position_correction_utils.load_fit``).
+    nonfailing_label : str
+        Value of ``cell_type`` of the non-failing cells.
+    n_components : int, optional
+        Number of principal components, by default 20.
+    seed : int, optional
+        Seed of the PCA, by default 0.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per stage (``before`` and ``after`` the correction) and component, with the
+        percent of the total variance that the component holds and the parts that position, the
+        row alone, and the heart status are associated with, and their R squared.
     """
     features = list(fit["features"])
     raw = medians[features].to_numpy(float)
@@ -360,11 +445,31 @@ def nonfailing_failing_difference(
     nonfailing_label: str,
     failing_label: str = "failing",
 ) -> pd.DataFrame:
-    """Length of the non-failing minus failing DMSO difference of every plate, before and after the correction.
+    """Distance between the non-failing and the failing DMSO profile of every plate, before and after the correction.
 
-    A plate without a non-failing or without a failing DMSO well (after the cell filter of the
-    caller) has NaN lengths. The columns ``n_nonfailing_dmso_wells`` and ``n_failing_dmso_wells``
-    say which plates they are, and the caller should report them and count the valid plates.
+    The distance is the Euclidean length of the difference between the mean non-failing DMSO
+    profile and the mean failing DMSO profile of a plate, over all features. A plate without a
+    non-failing or without a failing DMSO well (after the cell filter of the caller) has NaN
+    distances. The columns ``n_nonfailing_dmso_wells`` and ``n_failing_dmso_wells`` say which
+    plates they are, and the caller should report them and count the valid plates.
+
+    Parameters
+    ----------
+    medians : pd.DataFrame
+        Well medians, with the columns ``plate``, ``platemap``, ``treatment``, ``cell_type`` and the features.
+    fit : dict
+        Tilt map and plate amplitudes (``position_correction_utils.load_fit``).
+    nonfailing_label : str
+        Value of ``cell_type`` of the non-failing cells.
+    failing_label : str, optional
+        Value of ``cell_type`` of the failing cells, by default ``"failing"``.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per plate, with the numbers of wells of each kind, the distance before (``raw``)
+        and after (``corrected``) the correction, and ``share_that_survives``, the corrected
+        distance divided by the uncorrected one.
     """
     features = list(fit["features"])
     raw = medians[features].to_numpy(float)
@@ -400,7 +505,18 @@ def nonfailing_failing_difference(
 
 
 def _chi_square_statistic(first: np.ndarray, second: np.ndarray) -> float:
-    """Pearson chi-square statistic of the contingency table of two label arrays."""
+    """Pearson chi-square statistic of the contingency table of two label arrays.
+
+    Parameters
+    ----------
+    first, second : np.ndarray
+        Two arrays of labels of the same length, one entry for each observation.
+
+    Returns
+    -------
+    float
+        The sum over the cells of the table of ``(observed - expected) ** 2 / expected``.
+    """
     first_codes, first_levels = pd.factorize(first)
     second_codes, second_levels = pd.factorize(second)
     table = np.zeros((len(first_levels), len(second_levels)))
