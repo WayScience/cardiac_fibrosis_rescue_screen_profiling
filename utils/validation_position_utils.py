@@ -4,7 +4,7 @@ The screen estimates a plate-position effect (a "tilt": an additive row plus col
 for every feature) from compounds that were placed at random on 11 platemaps
 (``position_correction_utils``).
 The validation plates have one layout, shared by five replicate plates: both kinds of DMSO
-(healthy and failing cells) in blocks of columns over all rows, and 15 compounds in
+(non-failing and failing cells) in blocks of columns over all rows, and 15 compounds in
 columns 5 to 8, three on each plate at positions that differ between plates.
 Compounds do not average out of a tilt estimate with so few compounds, but every group of
 wells (a compound, or a kind of DMSO) sits at several positions, so we fit one effect per
@@ -36,7 +36,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-HEALTHY_CELL_TYPE = "nonfailing"  # the screen calls this "healthy"
+NONFAILING_CELL_TYPE = "nonfailing"  # the screen calls this "healthy"
 FAILING_CELL_TYPE = "failing"
 N_ROWS = len(pcu.ROWS)
 # the channels of the validation plates (the d2 channel is Golgi, and PM in the screen)
@@ -239,7 +239,7 @@ def fit_compound_adjusted_tilt(
 
     The screen places every compound at one position, so it can only average compound
     effects out over many compounds.
-    Here every group of wells (a compound, or with ``include_controls`` the healthy DMSO
+    Here every group of wells (a compound, or with ``include_controls`` the non-failing DMSO
     and the failing DMSO) sits at several positions, so we fit one effect for each group
     together with an additive row plus column effect per feature::
 
@@ -250,7 +250,7 @@ def fit_compound_adjusted_tilt(
     row and column effects are what differs between the positions of a group.
     The column effects have no reference column.
     When the groups sit in blocks of columns (for example the failing DMSO only in columns
-    2, 4, and 10, the healthy DMSO in columns 3, 9, and 11, and the compounds in columns 5
+    2, 4, and 10, the non-failing DMSO in columns 3, 9, and 11, and the compounds in columns 5
     to 8), a group effect can absorb the offset of its block of columns, so those offsets
     cannot be estimated and an unconstrained fit splits them between group and column
     effects arbitrarily, which distorts the difference between the groups.
@@ -271,7 +271,7 @@ def fit_compound_adjusted_tilt(
     min_cells : int, optional
         Minimum number of cells for a well to be used, by default 50.
     include_controls : bool, optional
-        Whether the DMSO wells enter the fit, as two groups (healthy and failing cells).
+        Whether the DMSO wells enter the fit, as two groups (non-failing and failing cells).
         By default only the compound wells do, one group for each compound. The corrected
         layout of the validation plates has the controls of both cell types at many rows
         and columns, so the fit needs them to see rows B and G.
@@ -547,7 +547,7 @@ def plate_amplitudes(
 
     The amplitude of a plate is the scale of the tilt that best matches its wells
     (``position_correction_utils.amplitude``) after the mean of each group of wells (a
-    compound, or the healthy or the failing DMSO) is removed from the profiles and from the
+    compound, or the non-failing or the failing DMSO) is removed from the profiles and from the
     tilt, so that what a group does is not counted as position.
     Its standard error comes from resampling the wells of the plate.
     The tilt was fit on all five plates, so the amplitudes are around 1, and a plate that
@@ -721,7 +721,7 @@ def position_variance_parts(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Measure the variation within groups of wells that is position, per feature.
 
-    The biology of a group of wells (the healthy DMSO, or the failing DMSO) is removed by
+    The biology of a group of wells (the non-failing DMSO, or the failing DMSO) is removed by
     looking only at how its own wells differ. A group sits at several positions, the same on
     every replicate plate. The variation of the position means of a group (which repeats on
     all plates) is position, plus any interaction of the group with its position. The
@@ -737,7 +737,7 @@ def position_variance_parts(
     values : np.ndarray
         Profiles of the compound wells with shape ``(len(wells), n_features)``.
     wells : pd.DataFrame
-        The wells with the columns ``group`` (healthy or failing DMSO) and ``well``, in the order of
+        The wells with the columns ``group`` (non-failing or failing DMSO) and ``well``, in the order of
         ``values``.
 
     Returns
@@ -783,7 +783,7 @@ def position_variance_share(values: np.ndarray, wells: pd.DataFrame) -> np.ndarr
     values : np.ndarray
         Profiles of the compound wells with shape ``(len(wells), n_features)``.
     wells : pd.DataFrame
-        The wells with the columns ``group`` (healthy or failing DMSO) and ``well``, in the order of
+        The wells with the columns ``group`` (non-failing or failing DMSO) and ``well``, in the order of
         ``values``.
 
     Returns
@@ -806,7 +806,7 @@ def held_out_position_variance(
 
     The measurement uses the DMSO wells, which sit at the same positions on all five
     plates, so the replicate plates give the noise (see ``position_variance_parts``): the
-    healthy DMSO and the failing DMSO are two groups.
+    non-failing DMSO and the failing DMSO are two groups.
 
     Parameters
     ----------
@@ -1056,11 +1056,11 @@ def control_contrast(
     features: Sequence[str],
     offsets: np.ndarray | None = None,
 ) -> pd.DataFrame:
-    """Measure the healthy minus failing DMSO contrast of every plate.
+    """Measure the non-failing minus failing DMSO contrast of every plate.
 
-    The healthy and the failing DMSO wells are selected by ``treatment`` and ``cell_type``
+    The non-failing and the failing DMSO wells are selected by ``treatment`` and ``cell_type``
     (not by row). Both sit in all six rows, in blocks of columns (failing in columns 2, 4,
-    and 10, healthy in 3, 9, and 11), so a tilt of rows and columns shifts them alike.
+    and 10, non-failing in 3, 9, and 11), so a tilt of rows and columns shifts them alike.
 
     Parameters
     ----------
@@ -1078,19 +1078,19 @@ def control_contrast(
     -------
     pd.DataFrame
         One row per plate with the column ``norm``, the Euclidean length of the difference
-        between the mean healthy DMSO and the mean failing DMSO profile.
+        between the mean non-failing DMSO and the mean failing DMSO profile.
     """
     features = list(features)
     profiles = well_medians[features].to_numpy(float)
     if offsets is not None:
         profiles = profiles - offsets
     is_dmso = (well_medians["treatment"] == "DMSO").to_numpy()
-    healthy = is_dmso & (well_medians["cell_type"] == HEALTHY_CELL_TYPE).to_numpy()
+    nonfailing = is_dmso & (well_medians["cell_type"] == NONFAILING_CELL_TYPE).to_numpy()
     failing = is_dmso & (well_medians["cell_type"] == FAILING_CELL_TYPE).to_numpy()
     records = []
     for plate in well_medians["plate"].unique():
         in_plate = (well_medians["plate"] == plate).to_numpy()
-        difference = profiles[in_plate & healthy].mean(axis=0) - profiles[
+        difference = profiles[in_plate & nonfailing].mean(axis=0) - profiles[
             in_plate & failing
         ].mean(axis=0)
         records.append({"plate": plate, "norm": float(np.linalg.norm(difference))})
@@ -1237,11 +1237,11 @@ def cosine_and_slope(observed: np.ndarray, predicted: np.ndarray) -> tuple[float
 
 
 def distance_from_class_mean(
-    values: np.ndarray, is_healthy: np.ndarray, is_failing: np.ndarray
+    values: np.ndarray, is_nonfailing: np.ndarray, is_failing: np.ndarray
 ) -> np.ndarray:
     """Distance of each DMSO well from the mean profile of its cell type (NaN for the other wells)."""
     result = np.full(len(values), np.nan)
-    for mask in (is_healthy, is_failing):
+    for mask in (is_nonfailing, is_failing):
         result[mask] = np.linalg.norm(values[mask] - values[mask].mean(axis=0), axis=1)
     return result
 

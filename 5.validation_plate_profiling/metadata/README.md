@@ -16,7 +16,7 @@ Only the compounds change from plate to plate.
 
 - 3 compounds (A, B, C) on failing cells (heart 25, dilated cardiomyopathy), 8 wells each
 - DMSO on failing cells (heart 25), 18 wells: the negative control used for bulk normalization
-- DMSO on non-failing cells (heart 7), 18 wells: the healthy control
+- DMSO on non-failing cells (heart 7), 18 wells: the non-failing control
 
 The compound in each slot on each plate is listed in the [module README](../README.md).
 

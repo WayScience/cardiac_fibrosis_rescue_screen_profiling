@@ -6,13 +6,13 @@
 # This notebook measures how large the position effect is on the validation plates and how much of it the correction removes, with five measurements.
 # It changes no data: it reads the well medians that `1.fit_position_correction.ipynb` cached and the committed fit.
 # 
-# The DMSO wells are the backbone of the measurements, because they sit at the same positions on all five plates: 18 healthy and 18 failing positions, in blocks of columns that cover all six rows (failing in columns 2, 4, and 10, healthy in 3, 9, and 11).
+# The DMSO wells are the backbone of the measurements, because they sit at the same positions on all five plates: 18 non-failing and 18 failing positions, in blocks of columns that cover all six rows (failing in columns 2, 4, and 10, non-failing in 3, 9, and 11).
 # The variation of a DMSO position between the plates is noise, and the variation between the positions of one cell type is position.
 # The compound wells sit on one plate each (three compounds per plate), so they cannot be replicated.
 # 
 # 1. **Position variation of every feature.** The share of the variation within each cell type of DMSO that is position, with the chance level subtracted (`vpu.position_variance_share`), on the uncorrected wells, after a tilt fit on all plates (in-sample, which a fit on its own data always favors), and after a tilt fit on the other four plates (held-out, `vpu.leave_one_plate_out_correction`).
-# 2. **Position against biology.** The size of the healthy against failing DMSO difference on each plate, with and without the correction, next to the difference that the tilt predicts between the healthy and the failing positions.
-# 3. **Does the row effect carry over between cell types?** The correction assumes position moves healthy and failing cells equally. The failing DMSO sits in columns 2, 4, and 10 and the healthy DMSO in columns 3, 9, and 11, so a tilt fit on one cell type has no column effect for the other and can only be tested on the rows. We fit the tilt on the failing DMSO only and check whether its row effects predict the row pattern of the healthy DMSO, and the other way round. This layout cannot test whether the column effects carry over.
+# 2. **Position against biology.** The size of the non-failing against failing DMSO difference on each plate, with and without the correction, next to the difference that the tilt predicts between the non-failing and the failing positions.
+# 3. **Does the row effect carry over between cell types?** The correction assumes position moves non-failing and failing cells equally. The failing DMSO sits in columns 2, 4, and 10 and the non-failing DMSO in columns 3, 9, and 11, so a tilt fit on one cell type has no column effect for the other and can only be tested on the rows. We fit the tilt on the failing DMSO only and check whether its row effects predict the row pattern of the non-failing DMSO, and the other way round. This layout cannot test whether the column effects carry over.
 # 4. **Per plate.** The distance of every DMSO well from the mean of its cell type, on the layout of each plate, before and after the held-out correction.
 # 5. **How well the tilt terms are determined.** The size of each row and column term of the tilt, with its uncertainty from leaving each plate out in turn.
 # 
@@ -54,7 +54,7 @@ for path in (fit_path, well_medians_cache):
         raise FileNotFoundError(f"{path} not found. Run 1.fit_position_correction.ipynb first.")
 
 min_cells = 50  # minimum cells for a well to be used (as in the screen)
-HEALTHY, FAILING = vpu.HEALTHY_CELL_TYPE, vpu.FAILING_CELL_TYPE
+NONFAILING, FAILING = vpu.NONFAILING_CELL_TYPE, vpu.FAILING_CELL_TYPE
 colors = {"raw": "#d62728", "in_sample": "#7f7f7f", "held_out": "#1f77b4"}
 
 
@@ -80,7 +80,7 @@ amplitude = wells["platemap"].map(fit["amplitudes"]).to_numpy(float)[:, None]
 tilt_at_wells = amplitude * pcu.tilt(coef, center, rows, cols0)
 corrected = raw - tilt_at_wells
 is_dmso = (wells["treatment"] == "DMSO").to_numpy()
-is_healthy = (is_dmso & (wells["cell_type"] == HEALTHY)).to_numpy()
+is_nonfailing = (is_dmso & (wells["cell_type"] == NONFAILING)).to_numpy()
 is_failing = (is_dmso & (wells["cell_type"] == FAILING)).to_numpy()
 print("Wells:", len(wells), "| Features:", len(features), "| Plates:", wells["plate"].nunique())
 
@@ -160,8 +160,8 @@ plt.show()
 
 # ## 2. Position against biology
 # 
-# The healthy against failing DMSO difference on each plate (the length of the difference of the mean profiles of the two cell types), before and after the correction.
-# The line is the difference that the tilt predicts between the positions of the healthy and the failing wells.
+# The non-failing against failing DMSO difference on each plate (the length of the difference of the mean profiles of the two cell types), before and after the correction.
+# The line is the difference that the tilt predicts between the positions of the non-failing and the failing wells.
 # If position were all of the difference, the corrected difference would be zero.
 
 # In[6]:
@@ -170,7 +170,7 @@ plt.show()
 records = []
 for plate in sorted(wells["plate"].unique()):
     in_plate = (wells["plate"] == plate).to_numpy()
-    h, f = in_plate & is_healthy, in_plate & is_failing
+    h, f = in_plate & is_nonfailing, in_plate & is_failing
     records.append(
         {
             "plate": plate,
@@ -180,14 +180,14 @@ for plate in sorted(wells["plate"].unique()):
     )
 position_vs_biology = pd.DataFrame(records)
 position_vs_biology["share_kept"] = position_vs_biology["corrected"] / position_vs_biology["raw"]
-tilt_healthy_vs_failing = float(np.linalg.norm(tilt_at_wells[is_healthy].mean(0) - tilt_at_wells[is_failing].mean(0)))
-position_vs_biology["tilt_healthy_vs_failing"] = tilt_healthy_vs_failing
+tilt_nonfailing_vs_failing = float(np.linalg.norm(tilt_at_wells[is_nonfailing].mean(0) - tilt_at_wells[is_failing].mean(0)))
+position_vs_biology["tilt_nonfailing_vs_failing"] = tilt_nonfailing_vs_failing
 print(position_vs_biology.round(2).to_string(index=False))
 
 # the same difference for the profiles averaged over the five plates (less noise than a single plate)
-pooled_raw = np.linalg.norm(raw[is_healthy].mean(0) - raw[is_failing].mean(0))
-pooled_corrected = np.linalg.norm(corrected[is_healthy].mean(0) - corrected[is_failing].mean(0))
-print(f"Plate-averaged healthy minus failing difference: {pooled_raw:.1f} before and {pooled_corrected:.1f} after the correction")
+pooled_raw = np.linalg.norm(raw[is_nonfailing].mean(0) - raw[is_failing].mean(0))
+pooled_corrected = np.linalg.norm(corrected[is_nonfailing].mean(0) - corrected[is_failing].mean(0))
+print(f"Plate-averaged non-failing minus failing difference: {pooled_raw:.1f} before and {pooled_corrected:.1f} after the correction")
 
 
 # In[7]:
@@ -200,14 +200,14 @@ ax.bar(x - 0.2, position_vs_biology["raw"], 0.4, color=colors["raw"], label="Unc
 ax.bar(x + 0.2, position_vs_biology["corrected"], 0.4, color=colors["held_out"], label="Corrected")
 ax.set_xticks(x)
 ax.set_xticklabels([f"Plate {i + 1}" for i in x])
-ax.set_ylabel("Length of the healthy minus failing DMSO difference")
-ax.set_title("Healthy against failing DMSO, with and without the correction")
-# the tilt has no healthy-against-failing component, so the two bars of a plate are the same
+ax.set_ylabel("Distance between the non-failing and failing DMSO profiles")
+ax.set_title("Non-failing against failing DMSO, with and without the correction")
+# the tilt has no non-failing-against-failing component, so the two bars of a plate are the same
 ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, fontsize=9, frameon=False)
 fig.text(
     0.5,
     0.01,
-    f"The tilt predicts a healthy against failing difference of {tilt_healthy_vs_failing:.1f}; the correction changes the difference of a plate by at most {largest_change:.0e}.",
+    f"The tilt predicts a non-failing against failing difference of {tilt_nonfailing_vs_failing:.1f}; the correction changes the difference of a plate by at most {largest_change:.0e}.",
     ha="center",
     fontsize=8,
 )
@@ -218,9 +218,9 @@ plt.show()
 
 # ## 3. Does the row effect carry over between cell types?
 # 
-# The correction subtracts one tilt from healthy and failing cells.
+# The correction subtracts one tilt from non-failing and failing cells.
 # That is right only if position moves both cell types in the same way.
-# The failing DMSO is in columns 2, 4, and 10 and the healthy DMSO in columns 3, 9, and 11, so a tilt fit on the wells of one cell type has no observation for the columns of the other.
+# The failing DMSO is in columns 2, 4, and 10 and the non-failing DMSO in columns 3, 9, and 11, so a tilt fit on the wells of one cell type has no observation for the columns of the other.
 # The ridge sets those column effects to zero, and what the fit predicts for the other cell type varies only by row.
 # We therefore compare the row patterns: the tilt fit on one cell type predicts the effect of each of the six rows, and we compare it with the mean profile of each row in the other cell type.
 # **This layout cannot test whether the column effects carry over between cell types.**
@@ -236,7 +236,7 @@ dmso = wells[is_dmso]
 
 plate_order = sorted(wells["plate"].unique())
 records = []
-for source, target in ((FAILING, HEALTHY), (HEALTHY, FAILING)):
+for source, target in ((FAILING, NONFAILING), (NONFAILING, FAILING)):
     source_wells = dmso[dmso["cell_type"] == source]
     tilt_fit = vpu.fit_compound_adjusted_tilt(source_wells, features, min_cells, include_controls=True)
     target_wells = dmso[dmso["cell_type"] == target]
@@ -269,7 +269,7 @@ ax.set_title("Does the row effect carry over between cell types?")
 ax.legend(fontsize=9, loc="upper center", ncol=2)
 ax = axes[1]
 tilt_fit = vpu.fit_compound_adjusted_tilt(dmso[dmso["cell_type"] == FAILING], features, min_cells, include_controls=True)
-row_labels, observed = vpu.mean_row_pattern(dmso[dmso["cell_type"] == HEALTHY], features)
+row_labels, observed = vpu.mean_row_pattern(dmso[dmso["cell_type"] == NONFAILING], features)
 predicted = vpu.tilt_row_pattern(tilt_fit)
 direction = np.linalg.svd(predicted, full_matrices=False)[2][0]
 row_colors = dict(zip(pcu.ROWS, plt.get_cmap("viridis")(np.linspace(1, 0, pcu.N_ROW_TERMS))))
@@ -279,8 +279,8 @@ for row, px, py in zip(row_labels, predicted @ direction, observed @ direction):
 limit = max(abs(predicted @ direction).max(), abs(observed @ direction).max()) * 1.1
 ax.plot([-limit, limit], [-limit, limit], color="black", lw=0.8, ls="--")
 ax.set_xlabel("Predicted by the tilt fit on the failing DMSO")
-ax.set_ylabel("Observed in the healthy DMSO")
-ax.set_title("Healthy DMSO rows on the main direction of the row effect")
+ax.set_ylabel("Observed in the non-failing DMSO")
+ax.set_title("Non-failing DMSO rows on the main direction of the row effect")
 ax.title.set_size(9)
 fig.tight_layout()
 fig.savefig(figure_dir / "row_effect_cross_cell_type.png", dpi=150)
@@ -303,8 +303,8 @@ held_out_profiles = vpu.leave_one_plate_out_correction(wells, features, min_cell
 deviation = wells[["plate", "well", "treatment", "cell_type"]].copy()
 deviation["row"] = deviation["well"].str[0]
 deviation["column"] = deviation["well"].str[1:].astype(int)
-deviation["raw"] = vpu.distance_from_class_mean(raw, is_healthy, is_failing)
-deviation["held_out"] = vpu.distance_from_class_mean(held_out_profiles, is_healthy, is_failing)
+deviation["raw"] = vpu.distance_from_class_mean(raw, is_nonfailing, is_failing)
+deviation["held_out"] = vpu.distance_from_class_mean(held_out_profiles, is_nonfailing, is_failing)
 deviation = deviation[is_dmso]
 
 by_row = deviation.groupby("row")[["raw", "held_out"]].mean()
@@ -355,7 +355,7 @@ plt.show()
 # 
 # **The model.** The correction subtracts, from every feature, a position effect that is the sum of one effect for the row of the well and one effect for its column (the tilt).
 # The model of a feature that the fit solves has one effect for each group (a compound, or the DMSO of one cell type), five row effects (rows C to G against row B), and ten column effects, with a tiny ridge penalty instead of a reference column (they are reported against column 2).
-# The groups sit in blocks of columns, so three column offsets (failing, healthy, compound columns) cannot be told from the group effects; the ridge sets them to zero.
+# The groups sit in blocks of columns, so three column offsets (failing, non-failing, compound columns) cannot be told from the group effects; the ridge sets them to zero.
 # It is fit on the wells of the 15 compounds and of the two kinds of DMSO, separately for each of the 2,453 features, with the replicate plates averaged.
 # The group effects are there so that what a compound or a cell type does is not counted as position.
 # The DMSO of each cell type is at 18 positions on every plate, three in each row.
@@ -364,7 +364,7 @@ plt.show()
 # **How well each term is determined.** We refit the tilt five times, each time without one plate, and measure how much every row and column term changes (the jackknife standard error).
 # A term whose estimate changes as much as its own size is not determined by these plates.
 # 
-# **Which terms the layout identifies.** The row terms are identified. A column term is identified only against a column of the same block (failing DMSO in columns 2, 4, and 10, healthy DMSO in 3, 9, and 11, compounds in 5 to 8), so `Column 4 vs 2` and `Column 10 vs 2` are. The other column terms cross two blocks: adding a constant to the columns of a block and subtracting it from the group effect of that block leaves every fitted profile unchanged, but it changes the contrasts of those columns against column 2. Shifting the healthy block (columns 3, 9, and 11) changes `Column 3 vs 2`, `Column 9 vs 2`, and `Column 11 vs 2`, and shifting the compound block (columns 5 to 8) changes `Column 5 vs 2` to `Column 8 vs 2`. Those terms depend on the ridge convention, and a small jackknife uncertainty only shows that they are stable under that convention, not that the layout determines them.
+# **Which terms the layout identifies.** The row terms are identified. A column term is identified only against a column of the same block (failing DMSO in columns 2, 4, and 10, non-failing DMSO in 3, 9, and 11, compounds in 5 to 8), so `Column 4 vs 2` and `Column 10 vs 2` are. The other column terms cross two blocks: adding a constant to the columns of a block and subtracting it from the group effect of that block leaves every fitted profile unchanged, but it changes the contrasts of those columns against column 2. Shifting the non-failing block (columns 3, 9, and 11) changes `Column 3 vs 2`, `Column 9 vs 2`, and `Column 11 vs 2`, and shifting the compound block (columns 5 to 8) changes `Column 5 vs 2` to `Column 8 vs 2`. Those terms depend on the ridge convention, and a small jackknife uncertainty only shows that they are stable under that convention, not that the layout determines them.
 
 # In[12]:
 

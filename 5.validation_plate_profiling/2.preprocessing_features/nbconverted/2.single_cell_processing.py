@@ -3,7 +3,7 @@
 
 # # Process single cell profiles
 # 
-# NOTE: We are normalizing the plates for all samples as we only have three wells associated with the healthy controls, which is insufficient for normalization.
+# NOTE: We are normalizing the plates for all samples as we only have three wells associated with the non-failing controls, which is insufficient for normalization.
 
 # ## Import libraries
 

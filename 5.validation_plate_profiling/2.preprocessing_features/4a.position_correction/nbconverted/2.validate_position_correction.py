@@ -179,7 +179,7 @@ plt.show()
 
 # ## Check that the method recovers a known tilt
 # 
-# We simulate the five plates on their real layouts (the real healthy DMSO, failing DMSO, and compound positions) with a known tilt (a strong row B effect), a random effect for each group of wells (the healthy DMSO, the failing DMSO, and each compound), and measurement noise.
+# We simulate the five plates on their real layouts (the real non-failing DMSO, failing DMSO, and compound positions) with a known tilt (a strong row B effect), a random effect for each group of wells (the non-failing DMSO, the failing DMSO, and each compound), and measurement noise.
 # The fit should recover the tilt without removing the group effects.
 # The true column effects are centered within the three blocks of columns, because the layout cannot tell a block offset from the effect of the group in it (the tilt that the fit can recover).
 # We also check the claim that the group effects are not removed: after the correction, the mean of every group is compared with its true effect (median cosine and scale over the groups).
@@ -196,7 +196,7 @@ sim_features = [f"f{j}" for j in range(n_features)]
 true_row = rng.normal(0, 1, (6, n_features)) * np.array([3.0, 0.5, 0.2, 0.4, 0.4, 0.4])[:, None]
 true_col = rng.normal(0, 0.5, (10, n_features))
 # The layout cannot tell the offset of a block of columns from the effect of the group that sits in it
-# (failing DMSO in columns 2, 4, and 10, healthy DMSO in 3, 9, and 11, compounds in 5 to 8), and the fit
+# (failing DMSO in columns 2, 4, and 10, non-failing DMSO in 3, 9, and 11, compounds in 5 to 8), and the fit
 # gives that offset to the group. The true column effects are therefore centered within each block: this
 # is the tilt that the fit can recover.
 for block in ([0, 2, 8], [1, 7, 9], [3, 4, 5, 6]):
@@ -244,7 +244,7 @@ for label, estimated in [
 # ## What this does and does not show
 # 
 # - A drop toward the shuffled-label level means the corrected profiles carry less information about plate row, including in directions the correction did not subtract.
-# - It does not show that the remaining signal is the right one, or that position moves healthy and failing cells equally (`5.quantify_position_effect.ipynb` tests that).
+# - It does not show that the remaining signal is the right one, or that position moves non-failing and failing cells equally (`5.quantify_position_effect.ipynb` tests that).
 # - Shuffled labels sit at chance by construction, so being close to them is the target, and "close enough" is a judgment.
 # - The DMSO wells sit at the same positions on all five plates, so the held-out plate is new in its compounds and its noise, and not in the positions of its controls.
 #   The test is about new plates on this layout, not about new layouts.

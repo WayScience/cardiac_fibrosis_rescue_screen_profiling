@@ -2,7 +2,7 @@
 
 This module processes the validation plates with the same workflow as modules 2, 3, and 4, using one plate map per plate in [`metadata/platemaps/`](./metadata/platemaps/).
 There are five validation plates.
-They share the same well layout: 36 DMSO control wells (18 healthy and 18 failing) in blocks of columns that cover all six rows, and 24 compound wells in the other columns.
+They share the same well layout: 36 DMSO control wells (18 non-failing and 18 failing) in blocks of columns that cover all six rows, and 24 compound wells in the other columns.
 Each plate tests three different compounds in 8 wells each, and each compound is on one plate only:
 
 | Plate | Barcode | Compound A | Compound B | Compound C |
@@ -27,7 +27,7 @@ All five plates have 60 wells (rows B to G, columns 2 to 11) and the same layout
 | Columns | Wells | Cells |
 | --- | --- | --- |
 | 2, 4, 10 | DMSO, 18 wells (3 per row) | failing: heart 25, dilated cardiomyopathy |
-| 3, 9, 11 | DMSO, 18 wells (3 per row) | healthy: heart 7, non-failing |
+| 3, 9, 11 | DMSO, 18 wells (3 per row) | non-failing: heart 7 |
 | 5 to 8 | compounds, 24 wells | failing: heart 25 |
 
 The three compounds of a plate (A, B, and C in the table above) rotate through the 24 compound wells in the same pattern on every plate.
@@ -36,8 +36,8 @@ Each compound is on one plate only, so its replicates are the 8 wells of that pl
 
 What the design means for the analysis:
 
-- **Controls for the hit calling.** The failing DMSO is the reference that compounds should move away from, and the healthy DMSO is the state that they should move toward. The failing DMSO is also the negative control of the bulk normalization.
-- **Rows are not confounded with cell type.** Both kinds of DMSO have three wells in every row, so a row effect can be estimated from the controls and does not look like a difference between healthy and failing cells.
+- **Controls for the hit calling.** The failing DMSO is the reference that compounds should move away from, and the non-failing DMSO is the state that they should move toward. The failing DMSO is also the negative control of the bulk normalization.
+- **Rows are not confounded with cell type.** Both kinds of DMSO have three wells in every row, so a row effect can be estimated from the controls and does not look like a difference between non-failing and failing cells.
 - **Identical layout on every plate.** The plates differ in their compounds only, so we can fit one position effect (row and column) to all plates and give each plate its own strength.
 - **Columns are not covered by controls.** The compounds sit in columns 5 to 8, which have no DMSO, so the column effects of these columns come from the compound wells and are only partly identifiable. [`2.preprocessing_features/4a.position_correction`](./2.preprocessing_features/4a.position_correction/) explains how the correction handles this and how much of the position effect it removes.
 

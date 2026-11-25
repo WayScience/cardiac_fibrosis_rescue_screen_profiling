@@ -4,8 +4,8 @@
 # # Effect of the plate-position correction on the feature space
 # 
 # `1.fit_position_correction.ipynb` estimates a plate-position effect (the "tilt") in the single-cell features of the validation plates, and `../4b.apply_position_correction.ipynb` subtracts it from every cell.
-# The tilt is an additive row plus column effect of the well position, estimated for each feature.
-# The correction subtracts the tilt from every cell.
+# The tilt is an additive row plus column effect of the well position, estimated for each feature separately: every feature has its own row and column effects, and each plate has one amplitude that scales all of them.
+# The correction subtracts the amplitude of the plate times the tilt of the well from every cell, so all cells of a well shift by the same vector.
 # 
 # This notebook computes what we need to show the effect of the correction on the features and on the well profiles, and saves it as tables.
 # `4.plot_effect_on_feature_space.ipynb` draws the figures:

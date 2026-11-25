@@ -301,7 +301,7 @@ def explained_by_position_and_cells(
 def partition_variance(
     medians: pd.DataFrame,
     fit: dict,
-    healthy_label: str,
+    nonfailing_label: str,
     n_components: int = 20,
     seed: int = 0,
 ) -> pd.DataFrame:
@@ -310,12 +310,12 @@ def partition_variance(
     The components are fit on the uncorrected wells and the corrected wells are projected
     on them. The position part of a component is the adjusted R squared of its scores on
     the row and column of the wells, and the status part is the squared correlation with
-    the healthy against failing label.
+    the non-failing against failing label.
 
     The two parts overlap and do not add up: they are associations of the score, not
     variance that one explains and the other does not. On the validation plates the
-    healthy wells are in columns 3, 9, and 11 and no other wells are, so the status label
-    is a sum of column indicators and a component that follows only the healthy columns
+    non-failing wells are in columns 3, 9, and 11 and no other wells are, so the status label
+    is a sum of column indicators and a component that follows only the non-failing columns
     scores 1 on both. The row alone (``row_*``) is not confounded with the status there,
     because every row has the same number of wells of each kind.
     """
@@ -328,7 +328,7 @@ def partition_variance(
     rows, cols = pcu.well_index(medians["well"])
     design = pcu.design_matrix(rows, cols)
     row_design = design[:, : pcu.N_ROW_TERMS]  # the row indicators, which act as the intercept
-    status = (medians["cell_type"] == healthy_label).to_numpy(float)
+    status = (medians["cell_type"] == nonfailing_label).to_numpy(float)
     records = []
     for stage, values in scores.items():
         variance = values.var(axis=0, ddof=1)
@@ -354,30 +354,30 @@ def partition_variance(
     return pd.DataFrame(records)
 
 
-def healthy_failing_difference(
+def nonfailing_failing_difference(
     medians: pd.DataFrame,
     fit: dict,
-    healthy_label: str,
+    nonfailing_label: str,
     failing_label: str = "failing",
 ) -> pd.DataFrame:
-    """Length of the healthy minus failing DMSO difference of every plate, before and after the correction.
+    """Length of the non-failing minus failing DMSO difference of every plate, before and after the correction.
 
-    A plate without a healthy or without a failing DMSO well (after the cell filter of the
-    caller) has NaN lengths. The columns ``n_healthy_dmso_wells`` and ``n_failing_dmso_wells``
+    A plate without a non-failing or without a failing DMSO well (after the cell filter of the
+    caller) has NaN lengths. The columns ``n_nonfailing_dmso_wells`` and ``n_failing_dmso_wells``
     say which plates they are, and the caller should report them and count the valid plates.
     """
     features = list(fit["features"])
     raw = medians[features].to_numpy(float)
     corrected = correct_well_medians(medians, fit)[features].to_numpy(float)
     is_dmso = (medians["treatment"] == "DMSO").to_numpy()
-    healthy = is_dmso & (medians["cell_type"] == healthy_label).to_numpy()
+    nonfailing = is_dmso & (medians["cell_type"] == nonfailing_label).to_numpy()
     failing = is_dmso & (medians["cell_type"] == failing_label).to_numpy()
     records = []
     for plate in sorted(medians["plate"].unique()):
         in_plate = (medians["plate"] == plate).to_numpy()
-        h, f = in_plate & healthy, in_plate & failing
-        n_healthy, n_failing = int(h.sum()), int(f.sum())
-        if n_healthy and n_failing:
+        h, f = in_plate & nonfailing, in_plate & failing
+        n_nonfailing, n_failing = int(h.sum()), int(f.sum())
+        if n_nonfailing and n_failing:
             raw_difference = raw[h].mean(0) - raw[f].mean(0)
             corrected_difference = corrected[h].mean(0) - corrected[f].mean(0)
             raw_length = np.linalg.norm(raw_difference)
@@ -388,7 +388,7 @@ def healthy_failing_difference(
             {
                 "plate": plate,
                 "platemap": int(medians.loc[in_plate, "platemap"].iloc[0]),
-                "n_healthy_dmso_wells": n_healthy,
+                "n_nonfailing_dmso_wells": n_nonfailing,
                 "n_failing_dmso_wells": n_failing,
                 "raw": raw_length,
                 "corrected": corrected_length,

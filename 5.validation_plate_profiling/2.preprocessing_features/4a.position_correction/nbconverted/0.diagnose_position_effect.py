@@ -8,7 +8,7 @@
 # 
 # The validation plates have one layout of 60 wells (rows B to G and columns 2 to 11), repeated on five replicate plates, except for the compounds:
 # 
-# - 36 DMSO wells at the same positions on every plate, in blocks of columns that cover all six rows: 18 failing (heart 25) in columns 2, 4, and 10, and 18 healthy (non-failing, heart 7) in columns 3, 9, and 11;
+# - 36 DMSO wells at the same positions on every plate, in blocks of columns that cover all six rows: 18 failing (heart 25) in columns 2, 4, and 10, and 18 non-failing (non-failing, heart 7) in columns 3, 9, and 11;
 # - 24 compound wells in columns 5 to 8 (all six rows), on failing cells (heart 25).
 #   Each plate holds three compounds, each in 8 wells, and each of the 15 compounds is on one plate only, so the compound wells are not replicated.
 # 
@@ -101,14 +101,14 @@ well_medians, features = vpu.load_or_build_well_medians(
 )
 
 well_medians["row"], well_medians["col"] = pcu.well_index(well_medians["well"])
-is_healthy = (well_medians["treatment"] == "DMSO") & (
-    well_medians["cell_type"] == vpu.HEALTHY_CELL_TYPE
+is_nonfailing = (well_medians["treatment"] == "DMSO") & (
+    well_medians["cell_type"] == vpu.NONFAILING_CELL_TYPE
 )
 is_failing = (well_medians["treatment"] == "DMSO") & (
     well_medians["cell_type"] == vpu.FAILING_CELL_TYPE
 )
 well_medians["kind"] = np.select(
-    [is_healthy, is_failing], ["healthy DMSO", "failing DMSO"], "compound"
+    [is_nonfailing, is_failing], ["non-failing DMSO", "failing DMSO"], "compound"
 )
 
 print("Plates:", well_medians["plate"].nunique())
@@ -125,7 +125,7 @@ print(
 
 # ## Layout check
 # 
-# The healthy and the failing DMSO should sit at identical positions on every plate and cover several rows and columns, so that position can be told apart from the cell type.
+# The non-failing and the failing DMSO should sit at identical positions on every plate and cover several rows and columns, so that position can be told apart from the cell type.
 # The compounds are on one plate each, in columns 5 to 8.
 # The first table lists the rows of the DMSO wells, and the second the wells of the compounds of the first plate.
 
@@ -179,7 +179,7 @@ print("Plates of each compound:", well_medians.loc[well_medians["kind"] == "comp
 # 
 # 1. **All wells**, as in the screen.
 # 2. **Failing DMSO wells only** (18 positions on 5 plates). One cell type and one treatment, so position is the only thing that varies between the positions.
-# 3. **Healthy DMSO wells only**, the same for the healthy cells.
+# 3. **Non-failing DMSO wells only**, the same for the non-failing cells.
 # 4. **DMSO wells without the cell-type effect.** We average the five plates, then subtract the mean profile of each cell type. What is left differs only between the positions of a cell type, so a row or column effect here cannot be an effect of the cell type.
 
 # In[5]:
@@ -197,9 +197,9 @@ failing_wells = wells[wells["kind"] == "failing DMSO"].reset_index(drop=True)
 failing_table, _, _ = pce.pc_variance_table(
     failing_wells, failing_wells[features].to_numpy(float), "failing DMSO wells", n_components, random_state, factors=("row", "col", "plate")
 )
-healthy_wells = wells[wells["kind"] == "healthy DMSO"].reset_index(drop=True)
-healthy_table, _, _ = pce.pc_variance_table(
-    healthy_wells, healthy_wells[features].to_numpy(float), "healthy DMSO wells", n_components, random_state, factors=("row", "col", "plate")
+nonfailing_wells = wells[wells["kind"] == "non-failing DMSO"].reset_index(drop=True)
+nonfailing_table, _, _ = pce.pc_variance_table(
+    nonfailing_wells, nonfailing_wells[features].to_numpy(float), "non-failing DMSO wells", n_components, random_state, factors=("row", "col", "plate")
 )
 
 # average the replicate plates of every DMSO well, then remove the mean of its cell type
@@ -219,7 +219,7 @@ within_table, _, _ = pce.pc_variance_table(
     factors=("row", "col"),
 )
 
-variance_by_position = pd.concat([all_table, failing_table, healthy_table, within_table])
+variance_by_position = pd.concat([all_table, failing_table, nonfailing_table, within_table])
 for analysis, table in variance_by_position.groupby("analysis", sort=False):
     print(f"\n{analysis}")
     print(table.drop(columns="analysis").head(6).round(3).to_string(index=False))
@@ -286,7 +286,7 @@ print(
 
 
 density = []
-for label, subset in (("failing DMSO wells", failing_wells), ("healthy DMSO wells", healthy_wells)):
+for label, subset in (("failing DMSO wells", failing_wells), ("non-failing DMSO wells", nonfailing_wells)):
     subset_pca = pce.fit_pca(subset[features].to_numpy(float), 3, random_state)
     density.append(
         pce.explained_by_position_and_cells(
@@ -411,7 +411,7 @@ plt.show()
 # ## How to read this notebook
 # 
 # - A component that plate row explains much more than by chance in the DMSO wells of one cell type, and also **without the cell-type effect**, is a position effect.
-# - Healthy and failing DMSO cover all six rows equally (three wells of each kind in every row of a plate), so a row effect cannot masquerade as the cell type.
+# - Non-failing and failing DMSO cover all six rows equally (three wells of each kind in every row of a plate), so a row effect cannot masquerade as the cell type.
 #   They sit in different blocks of columns, though, so a column effect is confounded with the cell type (and with the compounds, which are in columns 5 to 8): `1.fit_position_correction.ipynb` explains how the fit handles that.
 # - The number of cells per well changes with the row, and each adds to the other as an association with the first component.
 #   This is an association and not a pathway: it does not show that position acts through the cell number. A correction by position removes the part of the cell-number pattern that follows position too.

@@ -6,8 +6,8 @@
 # This notebook puts the validation plates next to the screen, with the same measurements on both, to show why the plate-position correction removed most of the position effect in the screen and only part of it on the validation plates.
 # It changes no data: it reads the well medians and the fit of this step (`1.fit_position_correction.ipynb`) and of the screen (`4.image_based_profiling/3a.position_correction`).
 # 
-# 1. **Variance by principal component, split into position and heart status.** The principal components of the well profiles, with the part that is associated with plate position (row plus column, in red; row alone, in orange) and the part that is associated with the heart status of the cells (healthy against failing, in blue), before and after the correction. The parts overlap: they are associations and do not add up.
-# 2. **Survival of the healthy against failing difference.** The length of the difference between the healthy and the failing DMSO profile on every plate, before and after the correction.
+# 1. **Variance by principal component, split into position and heart status.** The principal components of the well profiles, with the part that is associated with plate position (row plus column, in red; row alone, in orange) and the part that is associated with the heart status of the cells (non-failing against failing, in blue), before and after the correction. The parts overlap: they are associations and do not add up.
+# 2. **Survival of the non-failing against failing difference.** The length of the difference between the non-failing and the failing DMSO profile on every plate, before and after the correction.
 # 3. **Compound placement in the screen.** Whether the position of a compound on the screen platemaps is independent of the compound.
 # 
 # **Input**
@@ -60,17 +60,17 @@ min_cells = 50  # minimum cells for a well to be used (as in the screen)
 n_components = 20  # principal components to show
 seed = 0
 
-# the two data sets, with the label of the healthy cells in each
+# the two data sets, with the label of the non-failing cells in each
 datasets = {
     "Screen": {
         "medians": pd.read_parquet(screen_dir / "well_medians.parquet"),
         "fit": pcu.load_fit(screen_dir / "position_correction_fit.npz"),
-        "healthy": "healthy",
+        "nonfailing": "healthy",
     },
     "Validation": {
         "medians": pd.read_parquet("well_medians.parquet"),
         "fit": pcu.load_fit("position_correction_fit.npz"),
-        "healthy": vpu.HEALTHY_CELL_TYPE,
+        "nonfailing": vpu.NONFAILING_CELL_TYPE,
     },
 }
 colors = {"position": "#d62728", "status": "#1f77b4", "total": "#bdbdbd"}
@@ -89,12 +89,12 @@ for name, data in datasets.items():
 # - the **grey bar** is the variance of the wells on the component, as a percentage of the total variance of the uncorrected wells;
 # - the **red bar** is the part that is associated with plate position, from an additive row plus column regression (adjusted R squared times the variance);
 # - the **orange bar** is the part that is associated with plate row alone (the same regression with the rows only);
-# - the **blue bar** is the part that is associated with heart status (healthy against failing cells, squared correlation times the variance).
+# - the **blue bar** is the part that is associated with heart status (non-failing against failing cells, squared correlation times the variance).
 # 
 # **The red and the blue bars overlap, and they do not add up.**
-# On the screen, the healthy wells are all in row B and the failing control wells in row E, so the blue bar contains position.
-# On the validation plates the two cell types have the same number of wells in each of the six rows, so row is not confounded with heart status, but they sit in different blocks of columns (failing in columns 2, 4, and 10, healthy in 3, 9, and 11), and the healthy label is exactly the sum of the indicators of columns 3, 9, and 11.
-# A component that follows only the healthy columns therefore scores 1 on both the red and the blue bar, and the blue bar is not variance that position does not explain.
+# On the screen, the non-failing wells are all in row B and the failing control wells in row E, so the blue bar contains position.
+# On the validation plates the two cell types have the same number of wells in each of the six rows, so row is not confounded with heart status, but they sit in different blocks of columns (failing in columns 2, 4, and 10, non-failing in 3, 9, and 11), and the non-failing label is exactly the sum of the indicators of columns 3, 9, and 11.
+# A component that follows only the non-failing columns therefore scores 1 on both the red and the blue bar, and the blue bar is not variance that position does not explain.
 # The orange bar (row alone) is not confounded with heart status on the validation plates.
 # The red bar after the correction is the position variation that the fit leaves in the wells that it was fit on, which a fit on its own data always favors.
 # The position variation that the correction leaves in wells of a plate that it never saw is in [5.quantify_position_effect.ipynb](5.quantify_position_effect.ipynb).
@@ -105,7 +105,7 @@ for name, data in datasets.items():
 # the principal components of the screen are fit on all of its wells, as in its own analysis; the validation plates have 300 wells with at least 50 cells
 partitions = {
     name: pce.partition_variance(
-        data["all_wells"] if name == "Screen" else data["medians"], data["fit"], data["healthy"], n_components, seed
+        data["all_wells"] if name == "Screen" else data["medians"], data["fit"], data["nonfailing"], n_components, seed
     )
     for name, data in datasets.items()
 }
@@ -144,10 +144,10 @@ fig.savefig(figure_dir / "scree_position_and_heart_status.png", dpi=150, bbox_in
 plt.show()
 
 
-# ## 2. Survival of the healthy against failing difference
+# ## 2. Survival of the non-failing against failing difference
 # 
-# For every plate, the length of the difference between the mean healthy DMSO profile and the mean failing DMSO profile (over all features, in standard deviations of a single cell), before and after the correction.
-# On the screen, the healthy controls are in row B and the failing controls in row E on every platemap, so the correction shifts the two controls differently.
+# For every plate, the length of the difference between the mean non-failing DMSO profile and the mean failing DMSO profile (over all features, in standard deviations of a single cell), before and after the correction.
+# On the screen, the non-failing controls are in row B and the failing controls in row E on every platemap, so the correction shifts the two controls differently.
 # On the validation plates both cell types sit in every row, at the same positions on every plate, so the tilt shifts the two controls alike and leaves their difference as it is.
 # The difference that survives is the one that is left after the fitted tilt is subtracted. It is not necessarily all biology: the fit leaves the offsets of the three blocks of columns in the group effects.
 
@@ -155,15 +155,15 @@ plt.show()
 
 
 survival = {
-    name: pce.healthy_failing_difference(data["medians"], data["fit"], data["healthy"])
+    name: pce.nonfailing_failing_difference(data["medians"], data["fit"], data["nonfailing"])
     for name, data in datasets.items()
 }
-# a plate that has no healthy or no failing DMSO well with enough cells has no difference
+# a plate that has no non-failing or no failing DMSO well with enough cells has no difference
 for name, table in survival.items():
     excluded = table[table["raw"].isna()]
     print(f"{name}: {len(table) - len(excluded)} of {len(table)} plates have both DMSO groups")
     for row in excluded.itertuples():
-        print(f"  excluded {row.plate}: {row.n_healthy_dmso_wells} healthy and {row.n_failing_dmso_wells} failing DMSO wells")
+        print(f"  excluded {row.plate}: {row.n_nonfailing_dmso_wells} non-failing and {row.n_failing_dmso_wells} failing DMSO wells")
 print(pd.DataFrame({name: table[["raw", "corrected", "share_that_survives"]].median() for name, table in survival.items()}).round(2).to_string())
 
 
@@ -183,8 +183,8 @@ for name, table in survival.items():
     ax.hlines([table["raw"].median(), table["corrected"].median()], [left - 0.3, right - 0.3], [left + 0.3, right + 0.3], color="black", lw=2.5, zorder=4)
 ax.set_xticks([0, 1, 2.6, 3.6])
 ax.set_xticklabels(["Screen\nbefore", "Screen\nafter", "Validation\nbefore", "Validation\nafter"])
-ax.set_ylabel("Length of the healthy minus failing DMSO difference")
-ax.set_title("Difference between healthy and failing DMSO, per plate (black: median)", fontsize=10)
+ax.set_ylabel("Distance between the non-failing and failing DMSO profiles")
+ax.set_title("Difference between non-failing and failing DMSO, per plate (black: median)", fontsize=10)
 ax = axes[1]
 for k, (name, table) in enumerate(survival.items()):
     ax.scatter(np.full(len(table), k) + rng.uniform(-0.15, 0.15, len(table)), table["share_that_survives"], s=22, color=colors["status"], alpha=0.8)
@@ -198,9 +198,9 @@ ax.set_ylim(0, top)
 ax.set_xticks([0, 1])
 ax.set_xticklabels([f"{name}\n({table['raw'].notna().sum()} of {len(table)} plates)" for name, table in survival.items()])
 ax.set_ylabel("Share of the difference that survives the correction")
-ax.set_title("Corrected over uncorrected length", fontsize=10)
+ax.set_title("Corrected over uncorrected distance", fontsize=10)
 fig.tight_layout()
-fig.savefig(figure_dir / "healthy_failing_survival.png", dpi=150, bbox_inches="tight")
+fig.savefig(figure_dir / "nonfailing_failing_survival.png", dpi=150, bbox_inches="tight")
 plt.show()
 
 
