@@ -17,8 +17,8 @@
 # 
 # **Output**
 # - `slot_a_adjustment.npz`: the estimate (one value for every feature), the shrinkage factor, and what they come from. Step `1.apply_slot_a_adjustment.ipynb` reads it.
-# - `results/slot_a_permutation_null.csv` and `results/slot_a_vector_by_feature.csv`.
 # - `figures/slot_a_null.png`, `figures/slot_a_vector_by_family.png`, and `figures/compound_profiles_before_after.png`.
+# The notebook prints the tables (the permutation null, the estimate by feature family, and the estimate without each plate).
 
 # In[1]:
 
@@ -39,8 +39,6 @@ import validation_position_utils as vpu
 position_dir = pathlib.Path("../4a.position_correction")
 figure_dir = pathlib.Path("figures")
 figure_dir.mkdir(exist_ok=True)
-results_dir = pathlib.Path("results")
-results_dir.mkdir(exist_ok=True)
 
 min_cells = 50  # minimum cells of a well, as in the position correction
 slot_colors = {"A": "#d95f02", "B": "#7570b3", "C": "#1b9e77"}
@@ -89,7 +87,6 @@ print(f"Share of the arrangements with an energy at least as large (p-value): {a
 print(f"Shrinkage factor (energy - median) / energy: {adjustment['factor']:.3f}")
 sau.save_slot_adjustment(adjustment, "slot_a_adjustment.npz")
 
-pd.DataFrame({"energy": np.sort(null)}).to_csv(results_dir / "slot_a_permutation_null.csv", index=False)
 families = pd.DataFrame([vpu.parse_feature_family(name) for name in adjustment["features"]])
 by_feature = pd.concat(
     [
@@ -104,7 +101,6 @@ by_feature = pd.concat(
     ],
     axis=1,
 )
-by_feature.round(5).to_csv(results_dir / "slot_a_vector_by_feature.csv", index=False)
 
 
 # ## Without each plate in turn
@@ -127,7 +123,6 @@ jackknife = pd.DataFrame(
         ],
     }
 )
-jackknife.round(4).to_csv(results_dir / "slot_a_jackknife.csv", index=False)
 print(jackknife.round(3).to_string(index=False))
 
 

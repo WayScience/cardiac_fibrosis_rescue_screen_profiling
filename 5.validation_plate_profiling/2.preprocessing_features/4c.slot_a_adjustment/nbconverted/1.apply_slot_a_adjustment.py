@@ -20,7 +20,8 @@
 # 
 # **Input** (in `../data/`): the position-corrected single-cell profiles of step 4b and the bulk profiles of step 5.
 # 
-# **Output** (in `../data/`, which git ignores): the three kinds of files above and a copy of `slot_a_adjustment.npz` (with its jackknife estimates, which the hit calling uses), and in this folder `results/slot_a_adjustment_summary.csv`.
+# **Output** (in `../data/`, which git ignores): the three kinds of files above and a copy of `slot_a_adjustment.npz` (with its jackknife estimates, which the hit calling uses).
+# The notebook prints the checks of every plate.
 
 # In[1]:
 
@@ -39,9 +40,6 @@ import slot_adjustment_utils as sau
 data_dir = pathlib.Path("../data")
 single_cell_dir = data_dir / "single_cell_profiles"
 bulk_dir = data_dir / "bulk_profiles"
-results_dir = pathlib.Path("results")
-results_dir.mkdir(exist_ok=True)
-
 adjustment = sau.load_slot_adjustment("slot_a_adjustment.npz")
 print(f"Shrinkage factor {adjustment['factor']:.3f} on {len(adjustment['features'])} features (p = {adjustment['p_value']:.3f})")
 
@@ -150,6 +148,5 @@ for path in paths:
     adjusted_selected.to_parquet(single_cell_dir / f"{plate}_sc_slot_a_adjusted_feature_selected.parquet", index=False)
     print("Wrote the adjusted profiles of", plate, flush=True)
 summary = pd.DataFrame(records)
-summary.to_csv(results_dir / "slot_a_adjustment_summary.csv", index=False)
 summary.round(6)
 

@@ -204,8 +204,8 @@ def estimate_slot_a_adjustment(
 
 
 def save_slot_adjustment(adjustment: dict, path: str | pathlib.Path) -> None:
-    """Save the slot A adjustment to an ``.npz`` file (``load_slot_adjustment`` reads it)."""
-    np.savez(
+    """Save the slot A adjustment to a compressed ``.npz`` file (``load_slot_adjustment`` reads it)."""
+    np.savez_compressed(
         path,
         features=np.array(adjustment["features"]),
         vector=adjustment["vector"],

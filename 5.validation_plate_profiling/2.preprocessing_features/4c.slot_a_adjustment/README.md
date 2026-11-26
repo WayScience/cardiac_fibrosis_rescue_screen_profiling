@@ -35,7 +35,7 @@ All files are in `../data/` (git ignores it), next to the profiles that they com
 - Every cell and well has two more columns: `Metadata_slot` (A, B, or C for the compound wells, missing for the controls) and `Metadata_slot_a_adjusted` (true for the cells and wells that were shifted, the compounds in slot A wells).
 - Controls and the compounds in slots B and C are not changed, and neither is the position tilt.
 - The feature-selected files keep the features of step 4b, so the only difference to the position-corrected profiles is the shift. Feature selection is not run again.
-- The bulk profiles are shifted like the cells: the median of cells that all shift by the same vector is the median shifted by that vector. The median of the adjusted cells of every well equals the adjusted bulk profile of the well (the largest difference is 2e-16, [`results/slot_a_adjustment_summary.csv`](./results/slot_a_adjustment_summary.csv)).
+- The bulk profiles are shifted like the cells: the median of cells that all shift by the same vector is the median shifted by that vector. The median of the adjusted cells of every well equals the adjusted bulk profile of the well (the largest difference is 2e-16; `1.apply_slot_a_adjustment.ipynb` prints it for every plate and stops before it writes anything if a plate differs by more than 1e-6).
 - Like step 4b and 5, step 4c saves locally only. Copy the files to the folder that the hit calling reads (`validation_profiles/` on bandicoot) to use them there.
 
 ## Notebooks
@@ -45,8 +45,8 @@ The pipeline script `../preprocess_features.sh` does not run this step.
 
 | Notebook | What it does | Output |
 |---|---|---|
-| [`0.estimate_slot_a_effect.ipynb`](./0.estimate_slot_a_effect.ipynb) | Estimates the slot A vector from the position-corrected well medians of the 15 compounds, its permutation null, the shrinkage factor, and the estimate without each plate | `slot_a_adjustment.npz`, `results/slot_a_*.csv`, `figures/` |
-| [`1.apply_slot_a_adjustment.ipynb`](./1.apply_slot_a_adjustment.ipynb) | Writes the adjusted single-cell and bulk profiles and checks them | the new profiles, `results/slot_a_adjustment_summary.csv` |
+| [`0.estimate_slot_a_effect.ipynb`](./0.estimate_slot_a_effect.ipynb) | Estimates the slot A vector from the position-corrected well medians of the 15 compounds, its permutation null, the shrinkage factor, and the estimate without each plate | `slot_a_adjustment.npz`, `figures/` (the tables are printed in the notebook) |
+| [`1.apply_slot_a_adjustment.ipynb`](./1.apply_slot_a_adjustment.ipynb) | Writes the adjusted single-cell and bulk profiles and checks them | the new profiles (the checks of every plate are printed) |
 
 Every notebook has a script version in [`nbconverted/`](./nbconverted/), and the code is in [`../../../utils/slot_adjustment_utils.py`](../../../utils/slot_adjustment_utils.py).
 Notebook 0 needs the cache of the well medians of step 4a (`../4a.position_correction/well_medians.parquet`) and the committed fit.
