@@ -13,9 +13,11 @@ For more detail on each step, see the [module 4 README](../../4.image_based_prof
 | [`4a.position_correction/`](./4a.position_correction/) | Diagnose the plate-position effect, fit a correction, validate it on held-out plates, and draw the figures of the screen (analysis, not run by the pipeline script) | `position_correction_fit.npz`, tables, and figures |
 | [`4b.apply_position_correction.ipynb`](./4b.apply_position_correction.ipynb) | Subtract the fitted position effect from every cell of the normalized profiles of step 2, and select features | `*_sc_position_corrected`, `*_sc_position_corrected_feature_selected` |
 | [`5.bulk_position_corrected.ipynb`](./5.bulk_position_corrected.ipynb) | Aggregate the position-corrected cells to wells (median), pool the wells of all plates, and select features once | `bulk_position_corrected_feature_selected` (all plates pooled) |
+| [`4c.slot_a_adjustment/`](./4c.slot_a_adjustment/) | Estimate the effect of the compound slot A (one of three fixed sets of compound wells) that the position tilt cannot remove, and write **new** profiles with a shrunk part of it removed (analysis, not run by the pipeline script; optional) | `*_sc_slot_a_adjusted*`, `bulk_slot_a_adjusted_feature_selected`, `slot_a_adjustment.npz` |
 
 Steps 4a, 4b, and 5 are the steps 3a, 3b, and 4 of the screen ([module 4 README](../../4.image_based_profiling/README.md)).
 They follow the existing steps and do not change their outputs.
+Step 4c is a separate, optional step with its own file names; it does not change the outputs of steps 4b and 5 either.
 
 ## Single-cell QC
 
@@ -47,6 +49,20 @@ We correct it as in the screen:
 
 The feature names are those of the validation plates (the d2 channel is `Golgi`).
 
+## Slot A adjustment
+
+The three compounds of a plate rotate through the 24 compound wells in the same pattern on every plate, so every compound well is in one of three *slots* (A, B, or C), and the compounds were dispensed into the slots at random.
+The compounds of slot A score lower than those of slots B and C on all five plates, and the position tilt cannot remove this, because a compound sits in the wells of one slot only (its offset absorbs the slot).
+[`4c.slot_a_adjustment/`](./4c.slot_a_adjustment/) estimates the slot A effect, the part of the estimate that random assignment does not give (61%), and writes **new** profiles in which that part is subtracted from the compounds in slot A:
+
+- `data/single_cell_profiles/<plate>_sc_slot_a_adjusted.parquet` and `<plate>_sc_slot_a_adjusted_feature_selected.parquet`
+- `data/bulk_profiles/bulk_slot_a_adjusted_feature_selected.parquet`
+- `data/slot_a_adjustment.npz`
+
+The profiles of steps 4b and 5 are not changed.
+The [README of the step](./4c.slot_a_adjustment/README.md) has the method, the figures, the stability of the estimate, and what the adjustment cannot do.
+The hit calling compares the hits with and without it.
+
 ## Where outputs are saved
 
 All profiles are saved to `data/`, which git ignores.
@@ -57,6 +73,7 @@ The single-cell and bulk notebooks save each output locally with the `output_fil
 
 Steps 4b and 5 save locally only, with pycytominer's `output()` function and the `output_file` parameter of `feature_select`, and do not write to bandicoot.
 Their file names are new (`*_sc_position_corrected*` and `bulk_position_corrected_feature_selected`), so they do not overwrite the profiles of the earlier steps.
+Step 4c also saves locally only, with the new names `*_sc_slot_a_adjusted*` and `bulk_slot_a_adjusted_feature_selected`.
 They read the profiles of step 2 from `data/single_cell_profiles/` when it exists and from bandicoot otherwise.
 
 ## Run the module
@@ -72,6 +89,6 @@ QC runs once per plate, with the plate set through the `PLATE_ID` environment va
 As scripts, the QC notebooks do not render the example cell images, so QC takes only seconds per plate.
 To look at example outlier cells, open [`1.sc_quality_control.ipynb`](./1.sc_quality_control.ipynb) and set the default `plate_id` in the parameters cell.
 
-The script runs steps 4b and 5 after step 3, and it does not run step 4a.
+The script runs steps 4b and 5 after step 3, and it does not run steps 4a and 4c.
 Step 4b reads the committed fit, [`4a.position_correction/position_correction_fit.npz`](./4a.position_correction/position_correction_fit.npz).
 Run the notebooks of step 4a (see its [README](./4a.position_correction/README.md)) to refit the correction, for example when the normalized profiles change.
